@@ -1,0 +1,628 @@
+{{DISPLAYTITLE:RmlUI Starter Guide}}
+__TOC__
+
+= RmlUI Starter Guide =
+
+'''''For RecoilEngine game developers — build reactive, HTML/CSS-style game UIs in Lua.'''''
+
+{| class="wikitable"
+! Attribute !! Value
+|-
+| Engine || RecoilEngine (Spring)
+|-
+| Framework || RmlUi ([https://github.com/mikke89/RmlUi mikke89/RmlUi])
+|-
+| Language || Lua (via sol2 bindings)
+|-
+| Availability || LuaUI (LuaIntro / LuaMenu planned)
+|}
+
+----
+
+== 1. Introduction ==
+
+RmlUI is a UI framework that lets you build reactive game interfaces using an HTML/CSS-style workflow — with Lua instead of JavaScript. If you have ever built a web page, the learning curve is gentle. If you haven't, the concepts are still approachable because the mental model (mark-up + style + logic) is widely documented.
+
+RecoilEngine ships with a full RmlUI integration including:
+
+* An OpenGL 3 renderer tightly coupled to the engine's rendering pipeline
+* A virtual-filesystem-aware file loader so your <code>.rml</code> and <code>.rcss</code> files live inside game archives
+* Complete Lua bindings via sol2 so every RmlUI object is accessible from Lua
+* Custom elements: <code><nowiki><texture></nowiki></code> for engine textures and <code><nowiki><svg></nowiki></code> for vector art
+* A built-in DOM debugger for interactive inspection
+
+This guide walks you through everything you need to get a working, reactive widget running in LuaUI. The examples are game-engine-agnostic and safe to copy into any Recoil-based game.
+
+{{Note|RmlUI is currently available in '''LuaUI''' (the in-game UI). Support for LuaIntro and LuaMenu is planned for a future release.}}
+
+----
+
+== 2. Key Concepts ==
+
+Before writing any code it helps to understand the five core objects:
+
+{| class="wikitable"
+! Concept !! Description
+|-
+| '''Context''' || A named container that holds documents and data models. Multiple contexts can exist simultaneously, each rendered independently.
+|-
+| '''Document''' || A parsed RML file representing a DOM tree. Documents live inside a Context and can be shown, hidden, or closed.
+|-
+| '''RML''' || The markup language for documents. Very similar to XHTML (well-formed XML). The root tag is <code><nowiki><rml></nowiki></code> instead of <code><nowiki><html></nowiki></code>.
+|-
+| '''RCSS''' || The styling language. Similar to CSS2 with some differences (see section 11). File extension: <code>.rcss</code>.
+|-
+| '''Data Model''' || A Lua table exposed to the RML document via reactive data bindings. Changes to the model automatically update the rendered UI.
+|}
+
+On the '''Lua side''' you create contexts, attach data models to them, and load documents. On the '''RML side''' you declare your UI structure and reference data-model values through data bindings.
+
+Each widget will typically consist of at least three files: a <code>.lua</code>, a <code>.rml</code>, and optionally a <code>.rcss</code> file — grouping them in a folder per widget keeps things tidy.
+
+----
+
+== 3. Setup ==
+
+RecoilEngine ships a minimal setup script at <code>cont/LuaUI/rml_setup.lua</code>. It is included automatically by the base content handler but you should understand what it does so you can extend it for your game.
+
+=== 3.1 The rml_setup.lua script ===
+
+The script performs three tasks: guards against double-initialisation, loads font faces, and registers mouse-cursor aliases. Below is a more complete version that also creates a shared context and configures dp scaling:
+
+<syntaxhighlight lang="lua">
+--  luaui/rml_setup.lua
+--  author:  lov + ChrisFloofyKitsune
+--  License: GNU GPL, v2 or later
+
+if (RmlGuard or not RmlUi) then
+    return
+end
+-- Prevent this from running more than once
+RmlGuard = true
+
+-- Patch CreateContext to set dp_ratio automatically
+local oldCreateContext = RmlUi.CreateContext
+local function NewCreateContext(name)
+    local context = oldCreateContext(name)
+    local viewSizeX, viewSizeY = Spring.GetViewGeometry()
+    local userScale = Spring.GetConfigFloat("ui_scale", 1)
+    local baseWidth, baseHeight = 1920, 1080
+    local resFactor = math.min(viewSizeX / baseWidth, viewSizeY / baseHeight)
+    -- Floor to 2 decimal places to avoid floating point drift
+    context.dp_ratio = math.floor(resFactor * userScale * 100) / 100
+    return context
+end
+RmlUi.CreateContext = NewCreateContext
+
+-- Load fonts (list your .ttf files here)
+local font_files = {
+    -- "Fonts/MyFont-Regular.ttf",
+}
+for _, file in ipairs(font_files) do
+    RmlUi.LoadFontFace(file, true)
+end
+
+-- Map CSS cursor names to engine cursor names
+-- CSS cursor list: https://developer.mozilla.org/en-US/docs/Web/CSS/cursor
+RmlUi.SetMouseCursorAlias("default", 'cursornormal')
+RmlUi.SetMouseCursorAlias("move",    'uimove')
+RmlUi.SetMouseCursorAlias("pointer", 'Move')
+
+-- Create the shared context used by all widgets
+RmlUi.CreateContext("shared")
+</syntaxhighlight>
+
+=== 3.2 Including the setup in main.lua ===
+
+Add a single line to <code>luaui/main.lua</code> to run the setup before any widgets load:
+
+<syntaxhighlight lang="lua">
+-- luaui/main.lua
+VFS.Include(LUAUI_DIRNAME .. "rml_setup.lua", nil, VFS.ZIP)
+</syntaxhighlight>
+
+{{Note|The base-content <code>rml_setup.lua</code> only loads a font and sets cursor aliases; it does '''not''' create a context. If you are building a new game you should add context creation here or let each widget create its own context.}}
+
+----
+
+== 4. Writing Your First Document (.rml) ==
+
+Create a file at <code>luaui/widgets/my_widget/my_widget.rml</code>. RML is well-formed XML, so every tag must be closed and attribute values must be quoted.
+
+=== 4.1 Root structure ===
+
+<syntaxhighlight lang="xml">
+<rml>
+<head>
+    <title>My Widget</title>
+    <!-- External stylesheet (optional) -->
+    <link type="text/rcss" href="my_widget.rcss"/>
+    <!-- Inline styles -->
+    <style>
+        body { margin: 0; padding: 0; }
+    </style>
+</head>
+<body>
+    <!-- Your content here -->
+</body>
+</rml>
+</syntaxhighlight>
+
+=== 4.2 Styles (inline and .rcss) ===
+
+RmlUI starts with '''no default styles''' at all — not even block/inline defaults. The RmlUI docs provide an HTML4 base stylesheet you can copy in, but you will need to add form element styles yourself.
+
+Use <code>dp</code> units instead of <code>px</code> so your UI scales correctly with the player's display and <code>ui_scale</code> setting.
+
+<syntaxhighlight lang="css">
+/* Typical widget container */
+#my-widget {
+    position: absolute;
+    width: 400dp;
+    right: 10dp;
+    top: 50%;
+    transform: translateY(-50%);
+    pointer-events: auto;   /* required to receive mouse input */
+}
+
+#my-widget .panel {
+    padding: 10dp;
+    border-radius: 8dp;
+    border: 1dp #6c7086;   /* note: no 'solid' keyword – see section 11 */
+    background-color: rgba(30, 30, 46, 200);
+}
+</syntaxhighlight>
+
+=== 4.3 Data bindings in RML ===
+
+Attach a data model to a root element with <code>data-model="model_name"</code>. All data binding attributes inside that element can reference the model.
+
+<syntaxhighlight lang="xml">
+<body>
+  <!-- data-model scopes all bindings inside this div -->
+  <div id="my-widget" data-model="my_model">
+
+    <!-- Text interpolation -->
+    <p>Status: {{status_message}}</p>
+
+    <!-- Conditional visibility -->
+    <div data-if="show_details">
+        <p>Extra details go here.</p>
+    </div>
+
+    <!-- Dynamic class based on model value -->
+    <div class="panel" data-class-active="is_active">
+        Active panel
+    </div>
+
+    <!-- Loop over an array -->
+    <ul>
+        <li data-for="item, i: items">{{i}}: {{item.label}}</li>
+    </ul>
+
+    <!-- Two-way checkbox binding -->
+    <input type="checkbox" data-checked="is_enabled"/>
+
+    <!-- Data event: calls model function on click -->
+    <button data-click="on_button_click()">Click me</button>
+
+  </div>
+</body>
+</syntaxhighlight>
+
+'''Data binding reference:'''
+
+{| class="wikitable"
+! Binding !! Effect
+|-
+| <code><nowiki>{{value}}</nowiki></code> || Interpolate model value as text
+|-
+| <code>data-model="name"</code> || Attach named data model to this element and its children
+|-
+| <code>data-if="flag"</code> || Show element only when flag is truthy
+|-
+| <code>data-class-X="flag"</code> || Add class X when flag is truthy
+|-
+| <code>data-for="v, i: arr"</code> || Repeat element for each item in array arr
+|-
+| <code>data-checked="val"</code> || Two-way bind checkbox to boolean model value
+|-
+| <code>data-click="fn()"</code> || Call model function on click (data event)
+|-
+| <code>data-attr-src="val"</code> || Dynamically set the src attribute from model value
+|}
+
+----
+
+== 5. The Lua Widget ==
+
+Each widget is a Lua file that the handler loads. The <code>widget</code> global is injected by the widget handler and provides the lifecycle hooks.
+
+=== 5.1 Widget skeleton ===
+
+<syntaxhighlight lang="lua">
+-- luaui/widgets/my_widget/my_widget.lua
+if not RmlUi then return end   -- guard: RmlUi not available
+
+local widget = widget ---@type Widget
+
+function widget:GetInfo()
+    return {
+        name    = "My Widget",
+        desc    = "Demonstrates RmlUI basics.",
+        author  = "YourName",
+        date    = "2025",
+        license = "GNU GPL, v2 or later",
+        layer   = 0,
+        enabled = true,
+    }
+end
+</syntaxhighlight>
+
+=== 5.2 Loading the document ===
+
+<syntaxhighlight lang="lua">
+local RML_FILE  = "luaui/widgets/my_widget/my_widget.rml"
+local MODEL_NAME = "my_model"
+
+local rml_ctx    -- the RmlUi Context
+local dm_handle  -- the DataModel handle (MUST be kept – see section 6)
+local document   -- the loaded Document
+
+-- Initial data model state
+local init_model = {
+    status_message = "Ready",
+    is_enabled     = false,
+    show_details   = false,
+    items = {
+        { label = "Alpha", value = 1 },
+        { label = "Beta",  value = 2 },
+    },
+    -- Functions can live in the model too (callable from data-events)
+    on_button_click = function()
+        Spring.Echo("Button was clicked!")
+    end,
+}
+
+function widget:Initialize()
+    rml_ctx = RmlUi.GetContext("shared")
+
+    -- IMPORTANT: assign dm_handle or the engine WILL crash on RML render
+    dm_handle = rml_ctx:OpenDataModel(MODEL_NAME, init_model)
+    if not dm_handle then
+        Spring.Echo("[my_widget] Failed to open data model")
+        return
+    end
+
+    document = rml_ctx:LoadDocument(RML_FILE, widget)
+    if not document then
+        Spring.Echo("[my_widget] Failed to load document")
+        return
+    end
+
+    document:ReloadStyleSheet()
+    document:Show()
+end
+</syntaxhighlight>
+
+=== 5.3 Shutting down cleanly ===
+
+<syntaxhighlight lang="lua">
+function widget:Shutdown()
+    if document then
+        document:Close()
+        document = nil
+    end
+    -- Remove the model from the context; frees memory
+    rml_ctx:RemoveDataModel(MODEL_NAME)
+    dm_handle = nil
+end
+</syntaxhighlight>
+
+----
+
+== 6. Data Models in Depth ==
+
+=== 6.1 Opening a data model ===
+
+<code>context:OpenDataModel(name, table)</code> copies the structure of the table into a reactive proxy. The name must match the <code>data-model="name"</code> attribute in your RML. It must be unique within the context.
+
+{{Warning|You '''must''' store the return value of <code>OpenDataModel</code> in a variable. Letting it be garbage-collected while the document is open will crash the engine the next time RmlUI tries to render a data binding.}}
+
+=== 6.2 Reading and writing values ===
+
+For simple string/number/boolean values at the top level of the model you can use dot-notation directly on the handle:
+
+<syntaxhighlight lang="lua">
+-- Read a value
+local msg = dm_handle.status_message   -- works
+
+-- Write a value (auto-marks the field dirty; UI updates next frame)
+dm_handle.status_message = "Unit selected"
+dm_handle.is_enabled     = true
+</syntaxhighlight>
+
+=== 6.3 Iterating arrays ===
+
+Because the handle is a sol2 proxy, you cannot iterate it directly with <code>pairs</code> or <code>ipairs</code>. Call <code>dm_handle:__GetTable()</code> to get the underlying Lua table:
+
+<syntaxhighlight lang="lua">
+local tbl = dm_handle:__GetTable()
+
+for i, item in ipairs(tbl.items) do
+    Spring.Echo(i, item.label, item.value)
+    item.value = item.value + 1   -- modify in place
+end
+</syntaxhighlight>
+
+=== 6.4 Marking dirty ===
+
+When you modify nested values (e.g. elements inside an array) through <code>__GetTable()</code>, you must tell the model which top-level key changed so that RmlUI re-renders the bound elements:
+
+<syntaxhighlight lang="lua">
+-- After modifying tbl.items …
+dm_handle:__SetDirty("items")
+
+-- For a simple top-level assignment via dm_handle.key = value,
+-- dirty-marking is done automatically.
+</syntaxhighlight>
+
+----
+
+== 7. Events ==
+
+Recoil's RmlUI supports two distinct event families. They look similar but have different scopes — mixing them up is a common source of confusion.
+
+=== 7.1 Normal events (on*) ===
+
+Written as <code>onclick="myFunc()"</code>. The function is resolved from the '''second argument''' passed to <code>LoadDocument</code> — the widget table. These events do '''not''' have access to the data model.
+
+<syntaxhighlight lang="lua">
+-- Lua
+local doc_scope = {
+    greet = function(name)
+        Spring.Echo("Hello", name)
+    end,
+}
+document = rml_ctx:LoadDocument(RML_FILE, doc_scope)
+</syntaxhighlight>
+
+<syntaxhighlight lang="xml">
+<!-- RML -->
+<button onclick="greet('World')">Say hello</button>
+</syntaxhighlight>
+
+=== 7.2 Data events (data-*) ===
+
+Written as <code>data-click="fn()"</code>. The function is resolved from the '''data model'''. These events have full access to all model values.
+
+<syntaxhighlight lang="lua">
+-- Lua model
+local init_model = {
+    counter = 0,
+    increment = function()
+        -- dm_handle is captured in the closure
+        dm_handle.counter = dm_handle.counter + 1
+    end,
+}
+</syntaxhighlight>
+
+<syntaxhighlight lang="xml">
+<!-- RML -->
+<p>Count: {{counter}}</p>
+<button data-click="increment()">+1</button>
+</syntaxhighlight>
+
+'''Event type comparison:'''
+
+{| class="wikitable"
+! Type !! Syntax example !! Scope
+|-
+| Normal || <code>onclick="fn()"</code> || <code>LoadDocument</code> second argument (widget table)
+|-
+| Data || <code>data-click="fn()"</code> || Data model table
+|-
+| Normal || <code>onmouseover="fn()"</code> || <code>LoadDocument</code> second argument
+|-
+| Data || <code>data-mouseover="fn()"</code> || Data model table
+|}
+
+----
+
+== 8. Custom Recoil Elements ==
+
+Beyond standard HTML elements, Recoil adds two custom RML elements.
+
+=== 8.1 The &lt;texture&gt; element ===
+
+Renders any engine texture — unit icons, map thumbnails, GL4 render targets, etc. Behaves identically to <code><nowiki><img></nowiki></code> except the <code>src</code> attribute takes a '''Recoil texture reference string''' (see engine docs for the full format).
+
+<syntaxhighlight lang="xml">
+<!-- Load a file from VFS -->
+<texture src="unitpics/armcom.png" width="64dp" height="64dp"/>
+
+<!-- Reference a named GL texture -->
+<texture src="%luaui:myTextureName" width="128dp" height="128dp"/>
+</syntaxhighlight>
+
+=== 8.2 The &lt;svg&gt; element ===
+
+Renders an SVG image. Unlike upstream RmlUI, the Recoil implementation accepts either a file path '''or raw inline SVG data''' in the <code>src</code> attribute:
+
+<syntaxhighlight lang="xml">
+<!-- External file -->
+<svg src="images/icon.svg" width="32dp" height="32dp"/>
+
+<!-- Inline SVG data -->
+<svg src="<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><circle cx='5' cy='5' r='4' fill='red'/></svg>"
+     width="32dp" height="32dp"/>
+</syntaxhighlight>
+
+----
+
+== 9. Debugging ==
+
+RmlUI ships with a DOM debugger that you can open in-game to inspect elements, check computed styles, and view event logs.
+
+<syntaxhighlight lang="lua">
+-- Enable the debugger for the shared context.
+-- Call this AFTER the context has been created.
+RmlUi.SetDebugContext('shared')
+
+-- A handy pattern: toggle via a build flag in rml_setup.lua
+local DEBUG_RMLUI = true   -- set false before shipping
+if DEBUG_RMLUI then
+    RmlUi.SetDebugContext('shared')
+end
+</syntaxhighlight>
+
+Once enabled, a small panel appears in the game window. Click '''Debug''' to open the inspector or '''Log''' for the event log.
+
+{{Note|The debugger attaches to one context at a time. Using the shared context means you see all widgets in one place — very useful for tracking cross-widget interactions.}}
+
+----
+
+== 10. Best Practices ==
+
+; Use dp units everywhere
+: The <code>dp</code> unit scales with <code>context.dp_ratio</code>, so your UI automatically adapts to different resolutions and the player's <code>ui_scale</code> setting.
+
+; One shared context per game
+: Beyond All Reason and most community projects use a single <code>'shared'</code> context. Documents in the same context can reference the same data models and are Z-ordered relative to each other.
+
+; Keep data models flat when possible
+: Top-level writes via <code>dm_handle.key = value</code> are automatically dirty-marked. Deeply nested structures require manual <code>__SetDirty</code> calls — simpler models mean fewer bugs.
+
+; Separate per-document and shared styles
+: Put styles unique to one document in a <code><nowiki><style></nowiki></code> block inside the <code>.rml</code> file. Put styles shared across multiple documents in a <code>.rcss</code> file and link it.
+
+; Guard against missing RmlUi
+: Always start widgets with <code>if not RmlUi then return end</code> to prevent errors in environments where RmlUI is unavailable.
+
+; Check return values
+: Both <code>OpenDataModel</code> and <code>LoadDocument</code> can fail silently if paths are wrong. Always check for nil and log an error so you know immediately what happened.
+
+; Organise by widget folder
+: Group <code>luaui/widgets/my_widget/my_widget.lua</code>, <code>.rml</code>, and <code>.rcss</code> together. This makes the project navigable and each widget self-contained.
+
+----
+
+== 11. RCSS Gotchas ==
+
+RCSS closely follows CSS2 but has several important differences that will trip up web developers:
+
+; No default stylesheet
+: RmlUI ships with zero default styles. Block/inline, heading sizes, list bullets — none of it exists unless you add it. Copy the HTML4 base sheet from the RmlUI docs as a starting point.
+
+; RGBA alpha is 0–255
+: <code>rgba(255, 0, 0, 128)</code> means 50% transparent red. CSS uses 0.0–1.0 for alpha. The <code>opacity</code> property still uses 0.0–1.0.
+
+; Border shorthand has no style keyword
+: <code>border: 1dp #6c7086;</code> works. <code>border: 1dp solid #6c7086;</code> does '''not''' work. Only solid borders are supported; <code>border-style</code> is unavailable.
+
+; background-* properties use decorators
+: <code>background-color</code> works normally. <code>background-image</code>, <code>background-size</code>, etc. are replaced by the decorator system. See the RmlUI docs for syntax.
+
+; No list styling
+: <code>list-style-type</code> and friends are not supported. <code>ul</code>/<code>ol</code>/<code>li</code> have no special rendering — treat them as plain div-like elements.
+
+; Input text is set by content, not value
+: For <code><nowiki><input type="button"></nowiki></code> and <code><nowiki><input type="submit"></nowiki></code> the displayed text comes from the element's text content, not the <code>value</code> attribute (unlike HTML).
+
+; pointer-events: auto required
+: By default elements do not receive mouse events. Add <code>pointer-events: auto</code> to any element that needs to be interactive.
+
+----
+
+== 12. Differences from Upstream RmlUI ==
+
+The Recoil implementation is based on the official RmlUI library but adds engine-specific features and changes some defaults:
+
+{| class="wikitable"
+! Feature !! Description
+|-
+| '''<nowiki><texture></nowiki> element''' || A custom element that renders engine-managed textures via Recoil texture reference strings. Not present in upstream.
+|-
+| '''<nowiki><svg></nowiki> inline data''' || The <code>src</code> attribute accepts raw SVG markup in addition to file paths. Upstream only supports file paths.
+|-
+| '''VFS file loader''' || All file paths are resolved through Recoil's Virtual File System, so <code>.rml</code> and <code>.rcss</code> files work inside <code>.sdz</code> game archives transparently.
+|-
+| '''Lua bindings via sol2''' || The Lua API is provided by RmlSolLua (derived from [https://github.com/LoneBoco/RmlSolLua LoneBoco/RmlSolLua]) rather than the upstream Lua plugin, offering tighter engine integration.
+|-
+| '''dp_ratio via context''' || <code>context.dp_ratio</code> is set from code rather than the system DPI, allowing games to honour the player's <code>ui_scale</code> preference.
+|}
+
+{{Note|For everything not listed above, the upstream RmlUI documentation at [https://mikke89.github.io/RmlUiDoc/ mikke89.github.io/RmlUiDoc] applies directly.}}
+
+----
+
+== 13. IDE Setup ==
+
+Configuring your editor for <code>.rml</code> and <code>.rcss</code> file extensions dramatically improves the authoring experience.
+
+=== VS Code ===
+
+# Open any <code>.rml</code> file in VS Code.
+# Click the language mode indicator in the status bar (usually shows ''Plain Text'').
+# Choose '''Configure File Association for '.rml''''
+# Select '''HTML''' from the list.
+# Repeat for <code>.rcss</code> files, selecting '''CSS'''.
+
+=== Lua Language Server (lua-ls) ===
+
+Add the Recoil type annotations to your workspace for autocomplete on <code>RmlUi</code>, <code>Spring</code>, and all widget APIs. See the Recoil docs guide on the Lua Language Server for details.
+
+----
+
+== 14. Quick Reference ==
+
+=== Lua API ===
+
+{| class="wikitable"
+! Call !! Description
+|-
+| <code>RmlUi.CreateContext(name)</code> || Create a new rendering context
+|-
+| <code>RmlUi.GetContext(name)</code> || Retrieve an existing context by name
+|-
+| <code>RmlUi.LoadFontFace(path, fallback)</code> || Register a <code>.ttf</code> font (<code>fallback=true</code> recommended)
+|-
+| <code>RmlUi.SetMouseCursorAlias(css, engine)</code> || Map a CSS cursor name to an engine cursor name
+|-
+| <code>RmlUi.SetDebugContext(name)</code> || Attach the DOM debugger to a named context
+|-
+| <code>ctx:OpenDataModel(name, tbl)</code> || Create reactive data model from Lua table; '''store the return value!'''
+|-
+| <code>ctx:RemoveDataModel(name)</code> || Destroy a data model and free its memory
+|-
+| <code>ctx:LoadDocument(path, scope)</code> || Parse an RML file; scope is used for normal (<code>on*</code>) events
+|-
+| <code>doc:Show()</code> || Make the document visible
+|-
+| <code>doc:Hide()</code> || Hide the document (keeps it in memory)
+|-
+| <code>doc:Close()</code> || Destroy the document
+|-
+| <code>doc:ReloadStyleSheet()</code> || Reload linked <code>.rcss</code> files (useful during development)
+|-
+| <code>dm:__GetTable()</code> || Get the underlying Lua table for iteration
+|-
+| <code>dm:__SetDirty(key)</code> || Mark a top-level model key as changed; triggers re-render
+|-
+| <code>dm.key = value</code> || Write a top-level value; auto-marks dirty
+|}
+
+=== Useful Links ===
+
+* [https://mikke89.github.io/RmlUiDoc/ RmlUI official documentation]
+* [https://mikke89.github.io/RmlUiDoc/pages/data_bindings/views_and_controllers.html RmlUI data bindings reference]
+* [https://mikke89.github.io/RmlUiDoc/pages/rcss.html RmlUI RCSS reference]
+* [https://mikke89.github.io/RmlUiDoc/pages/rml/html4_style_sheet.html RmlUI HTML4 base stylesheet]
+* [https://mikke89.github.io/RmlUiDoc/pages/rcss/decorators.html RmlUI decorators (backgrounds)]
+* [https://github.com/mikke89/RmlUi RmlUI GitHub]
+* [https://github.com/beyond-all-reason/RecoilEngine/tree/master/rts/Rml RecoilEngine source (rts/Rml/)]
+* Recoil texture reference strings — see engine docs: <code>articles/texture-reference-strings</code>
+
+[[Category:Guides]]
+[[Category:LuaUI]]
+[[Category:RmlUI]]

@@ -123,8 +123,27 @@ The setup script above can then be included from your `luaui/main.lua` (main.lua
 ```lua
 VFS.Include(LUAUI_DIRNAME .. "rml_setup.lua",  nil, VFS.ZIP) -- Runs the script
 ```
-> [!NOTE] The rml_setup.lua script included in base content only imports a font and cursor and doesn't create a context or set scaling
+> [!NOTE] If you are working on a widget for an existing game, check whether the game already has a setup script — it may not include all of the pieces shown above (font loading, cursor aliases, context creation, dp_ratio).
 
+
+### Keeping dp_ratio Updated
+
+The setup script sets `dp_ratio` once at context creation time, but the user may resize the window or change their `ui_scale` config during a session. To keep `dp_ratio` correct you need to recalculate and reapply it whenever the viewport changes.
+
+The `ViewResize` callin fires whenever the window is resized. Add it to your widget and update each context you own:
+
+```lua
+function widget:ViewResize(newSizeX, newSizeY)
+    local userScale = Spring.GetConfigFloat("ui_scale", 1)
+    local baseWidth = 1920
+    local baseHeight = 1080
+    local resFactor = math.min(newSizeX / baseWidth, newSizeY / baseHeight)
+    local dp = math.floor(resFactor * userScale * 100) / 100
+    widget.rmlContext.dp_ratio = dp
+end
+```
+
+If you have multiple contexts, update each one. [Mupersega's `rml_context_manager.lua`](https://github.com/beyond-all-reason/Beyond-All-Reason/blob/master/luaui/rml_context_manager.lua) in Beyond All Reason is a good reference implementation that handles context lifecycle and `dp_ratio` tracking together.
 
 ### Writing Your First Document
 
@@ -226,7 +245,7 @@ Let's take a look at different areas that are important to look at.
 any attribute starting with `data-` is a "data event". We will go through a couple below, but you can find out more here [on the RmlUi docs site](https://mikke89.github.io/RmlUiDoc/pages/data_bindings/views_and_controllers.html).
 1. Double curly braces are used to show values from the data model within the document text. e.g. `{{message}}` shows the value of `message` in the data model.
 2. `data-class-expanded="expanded"` applies the `expanded` class to the div if the value `expanded` in the data model is `true`.
-3. `<input type="checkbox" value="expanded" data-checked="expanded"/>` This checkbox will set the data model value in `data-checked` to true.
+3. `<input type="checkbox" value="expanded" data-checked="expanded"/>` This is a two-way binding: the checkbox reflects the current value of `expanded` in the data model, and toggling it writes back `true` or `false` to that field.
 4. When the data model is changed, the document is rerendered automatically. So, the expanding div will have the `expanded` class applied to it or removed whenever the check box is toggled.
 
 There are data bindings to allow you to loop through arrays (data-for) have conditional sections of the document (data-if) and many others. 
@@ -315,23 +334,25 @@ end
 
 In the script, we are given a data model handle. This is a proxy for the Lua table used as the data model; as the Recoil RmlUi integration uses Sol2 as a wrapper data cannot be accessed directly.
 
-In most cases, you can simply do `dm_handle.expanded = true`, but this only works for table entries with string keys. What if you have an array, like `testArray` above? To loop through on the Lua side, you will need to get the underlying table:
+In most cases, you can simply do `dm_handle.expanded = true`. Assigning to any field on the handle (or any nested table within it, at any depth) automatically marks the relevant parts of the model as dirty and triggers a UI update — you do not need to call `__SetDirty` manually.
+
+What if you have an array, like `testArray` above, and want to loop through it on the Lua side? You will need to get the underlying table:
 
 ```lua
 local model_handle = dm_handle:__GetTable()
 ```
 
-As of writing, this function is not documented in the Lua API, due to some problems with language server generics that haven't been sorted out yet. It is there, however, and will be added back in in the future. it returns the table with the shape of your inital model.
-You can then iterate through it, and change things as you please:
+As of writing, this function is not documented in the Lua API, due to some problems with language server generics that haven't been sorted out yet. It is there, however, and will be added back in in the future. It returns the table with the shape of your initial model.
+You can then iterate through it and change things as you please:
 
 ```lua
 for i, v in pairs(model_handle.testArray) do
     Spring.Echo(i, v.name)
     v.value = v.value + 1
 end
--- If you modified anything in the table, as we did here, we need to set the model handle "dirty", so it refreshes.
-dm_handle:__SetDirty("testArray") -- We modified something nested in the array, so we mark the top level table entry as dirty
 ```
+
+> [!NOTE] Use `pairs` rather than `ipairs` when iterating over data model arrays on the Lua side. The model handle does not currently implement `__len`, so `ipairs` will not traverse the array correctly. This will be resolved once `__len` is backported.
 
 ### Debugging
 
@@ -363,8 +384,6 @@ Some of the rough edges you are likely to run into have already been discussed, 
 ---
 
 Unlike a web browser a default set of styles is not included, as a starting point you can look at the [RmlUi documentation](https://mikke89.github.io/RmlUiDoc/pages/rml/html4_style_sheet.html) though this doesn't provide styles for form elements.
-
-When using Context:OpenDataModel in Lua you must assign the return value to a variable, not doing so will cause the engine to crash when the model is reference in RML.
 
 Input elements of type submit & button behave differently to HTML and more like Button elements in that their text is not set by the value attribute. (This is likely to be corrected in a future version)
 

@@ -1,0 +1,479 @@
+= Recoil: Migrating From Spring =
+
+Recoil is a fork and continuation of the Spring RTS engine (version 105.0), maintained by the [https://github.com/beyond-all-reason Beyond All Reason] team. While Recoil is mostly compatible with Spring 105, divergences have naturally developed over time. This page lists the most relevant breaking changes and how to fix them when migrating a game or widget from Spring to Recoil.
+
+For a quick overview of why you might choose Recoil over the original Spring, see [[Recoil:Choose Recoil]].
+
+__TOC__
+
+== Versioning ==
+
+Recoil switched to a date-based versioning scheme beginning with version 2025.01. Version numbers jump from 105-xxxx to 2025.xx. Use <code>Engine.versionMajor</code>, <code>Engine.versionMinor</code>, and <code>Engine.commitsNumber</code> instead of the old commit-count scheme where possible.
+
+For feature detection without version comparisons, use the <code>Engine.FeatureSupport</code> table (see [[#Feature Support Table|Feature Support Table]] below).
+
+== Lua API Changes ==
+
+=== Font Rendering ===
+
+Rendering fonts now obeys the GL color state. Text may appear in a different color than expected. To restore previous behavior, add a <code>gl.Color</code> call before <code>gl.Text</code>:
+
+<syntaxhighlight lang="lua">
+gl.Color(1, 1, 1, 1)  -- set white before drawing text
+gl.Text("Hello world", x, y, size, options)
+</syntaxhighlight>
+
+Alternatively, use inline colour codes: <code>\255\rrr\ggg\bbb</code>
+
+=== Spring.Marker Functions ===
+
+<code>Spring.MarkerAddPoint</code>, <code>Spring.MarkerAddLine</code>, and <code>Spring.MarkerErasePosition</code> no longer accept numerical <code>0</code> as <code>false</code> for the <code>onlyLocal</code> parameter. Lua semantics now apply (0 is truthy). Change <code>0</code> to <code>false</code>:
+
+<syntaxhighlight lang="lua">
+-- Before
+Spring.MarkerAddPoint(x, y, z, text, 0)
+Spring.MarkerAddLine(x1, y1, z1, x2, y2, z2, 0, playerId)
+Spring.MarkerErasePosition(x, y, z, noop, 0, playerId)
+
+-- After
+Spring.MarkerAddPoint(x, y, z, text, false)
+Spring.MarkerAddLine(x1, y1, z1, x2, y2, z2, false, playerId)
+Spring.MarkerErasePosition(x, y, z, noop, false, playerId)
+</syntaxhighlight>
+
+=== Spring.GetConfig Functions ===
+
+<code>Spring.GetConfigInt</code>, <code>Spring.GetConfigFloat</code>, and <code>Spring.GetConfigString</code> now accept <code>nil</code> as the second argument (the default value to return if the key is not set). Previously, <code>nil</code> was treated as <code>0</code> (Int/Float) or <code>""</code> (String).
+
+To restore previous behavior:
+
+<syntaxhighlight lang="lua">
+local originalGetConfigInt = Spring.GetConfigInt
+Spring.GetConfigInt = function(key, def)
+    return originalGetConfigInt(key, def) or 0
+end
+</syntaxhighlight>
+
+=== Spring.GetSelectedUnitsSorted and Spring.GetSelectedUnitsCounts ===
+
+The tables returned by <code>Spring.GetSelectedUnitsSorted</code> and <code>Spring.GetSelectedUnitsCounts</code> no longer contain an <code>n</code> key with the number of unitDefs. Use the second return value instead:
+
+<syntaxhighlight lang="lua">
+-- Before
+local counts = Spring.GetSelectedUnitsCounts()
+local unitDefsCount = counts.n
+counts.n = nil
+
+-- After
+local counts, unitDefsCount = Spring.GetSelectedUnitsCounts()
+</syntaxhighlight>
+
+=== Spring.UnitIconSetDraw Renamed ===
+
+<code>Spring.UnitIconSetDraw</code> has been renamed to <code>Spring.SetUnitIconDraw</code>. The old spelling still works but is deprecated and will be removed in a future version.
+
+=== Spring.GetUnitCommands / Spring.GetCommandQueue ===
+
+<code>Spring.GetUnitCommands(unitID, 0)</code> and <code>Spring.GetCommandQueue</code> are deprecated for counting queue size. Use the new dedicated function instead:
+
+<syntaxhighlight lang="lua">
+-- Before
+local count = Spring.GetUnitCommands(unitID, 0)
+
+-- After
+local count = Spring.GetUnitCommandCount(unitID)
+</syntaxhighlight>
+
+Similarly, <code>Spring.GetFactoryCommands(unitID, 0)</code> is deprecated in favor of <code>Spring.GetFactoryCommandCount(unitID)</code>.
+
+=== Iterating Synced Proxy Tables ===
+
+The functions <code>snext</code>, <code>spairs</code>, and <code>sipairs</code> for iterating synced proxy tables have been '''removed'''. They have been equivalent to the standard Lua <code>next</code>, <code>pairs</code>, and <code>ipairs</code> for years. Replace them:
+
+<syntaxhighlight lang="lua">
+-- Before
+for key, value in spairs(SYNCED.foo) do ... end
+
+-- After
+for key, value in  pairs(SYNCED.foo) do ... end
+</syntaxhighlight>
+
+=== VFS Mapping API ===
+
+<code>Spring.MapArchive</code> and <code>Spring.UnmapArchive</code> (and equivalently <code>VFS.MapArchive</code> / <code>VFS.UnmapArchive</code>) have been temporarily removed due to sync-unsafety. Use <code>Spring.UseArchive</code> / <code>VFS.UseArchive</code> in the meantime. The original functions may return at a future date.
+
+=== UnitUnitCollision Return Value ===
+
+The return value from the <code>UnitUnitCollision</code> callin is now ignored, and only one event fires per collision pair (instead of two). There is currently no replacement for the old two-event behavior.
+
+=== gl.GetMatrix Removed ===
+
+<code>gl.GetMatrix</code> and the interface accessible from its returned matrix object have been removed. These were unused; no direct replacement is available.
+
+=== Removed Platform Constants ===
+
+The following depth buffer support constants have been removed:
+
+* <code>Platform.glSupport16bitDepthBuffer</code>
+* <code>Platform.glSupport24bitDepthBuffer</code>
+* <code>Platform.glSupport32bitDepthBuffer</code>
+
+Replace with:
+
+<syntaxhighlight lang="lua">
+Platform.glSupportDepthBufferBitDepth >= 16  -- or 24, or 32
+</syntaxhighlight>
+
+=== Game.allowTeamColors Removed ===
+
+The deprecated <code>Game.allowTeamColors</code> entry (which was always <code>true</code>) has been removed. If you used it as a boolean condition, note that its removal inverts its effect — previously <code>if Game.allowTeamColors then</code> was always true; now the variable is <code>nil</code> (falsy).
+
+=== Removed UnitDefs Keys ===
+
+The following deprecated <code>UnitDefs</code> keys have been removed (they previously returned zero with a warning):
+
+{| class="wikitable"
+|-
+! Removed Key
+|-
+| <code>techLevel</code>
+|-
+| <code>harvestStorage</code>
+|-
+| <code>extractSquare</code>
+|-
+| <code>canHover</code>
+|-
+| <code>drag</code>
+|-
+| <code>isAirBase</code>
+|-
+| <code>cloakTimeout</code>
+|-
+| <code>minx</code>, <code>miny</code>, <code>minz</code>
+|-
+| <code>maxx</code>, <code>maxy</code>, <code>maxz</code>
+|-
+| <code>midx</code>, <code>midy</code>, <code>midz</code>
+|}
+
+=== tdfID Removed from WeaponDefs ===
+
+The <code>tdfID</code> field has been removed from weapon defs and the <code>WeaponDefs</code> table. Any remaining interfaces receive <code>weaponDefID</code> instead.
+
+=== loadstring Bytecode ===
+
+<code>loadstring</code> in Lua no longer accepts bytecode by default, for safety and maintainability reasons. It still works in devmode.
+
+== Unit Defs ==
+
+=== Hovercraft and Ships Upright Behavior ===
+
+Hovercraft and ships brought out of water are no longer forced to be upright. To restore previous behavior, add <code>upright = true</code> to all unit defs whose movedef is of the hovercraft or ship type.
+
+=== useFootPrintCollisionVolume ===
+
+Units with <code>useFootPrintCollisionVolume = true</code> but no <code>collisionVolumeScales</code> set will now actually use the footprint volume (previously they mistakenly used the model's bounding sphere).
+
+To keep the old hitvolume behavior, set <code>useFootPrintCollisionVolume = false</code> for units with no <code>collisionVolumeScales</code>. This can be done in unit def post-processing:
+
+<syntaxhighlight lang="lua">
+for unitDefID, unitDef in pairs(UnitDefs) do
+    if not unitDef.collisionvolumescales then
+        unitDef.usefootprintcollisionvolume = nil
+    end
+end
+</syntaxhighlight>
+
+=== Tree Feature Defs ===
+
+The feature defs <code>treetype0</code> through <code>treetype16</code> are now provided by the basecontent archive instead of the engine itself. Games that shipped their own basecontent will know what to do; most games are unaffected.
+
+=== Firestarter Weapon Tag ===
+
+The <code>firestarter</code> weapon tag is no longer capped at 10000 in defs (which was 100 in Lua <code>WeaponDefs</code> after rescaling). It is now uncapped.
+
+To restore the previous cap:
+
+<syntaxhighlight lang="lua">
+for weaponDefID, weaponDef in pairs(WeaponDefs) do
+    if weaponDef.firestarter then
+        weaponDef.firestarter = math.min(weaponDef.firestarter, 10000)
+    end
+end
+</syntaxhighlight>
+
+=== acceleration and brakeRate (Deprecation Warning) ===
+
+The unit def tags <code>acceleration</code> and <code>brakeRate</code> are '''scheduled''' for a unit change from elmo/frame to elmo/second. They currently still work as before, but it is strongly recommended to migrate to <code>maxAcc</code> and <code>maxDec</code> respectively, which will remain in elmo/frame:
+
+<syntaxhighlight lang="lua">
+-- In unit def files or post-processing:
+-- acceleration  →  maxAcc   (elmo/frame, unchanged)
+-- brakeRate     →  maxDec   (elmo/frame, unchanged)
+</syntaxhighlight>
+
+=== Def Validity Checks ===
+
+Some invalid or missing def values are now handled more strictly:
+
+* Negative values for health, speed, reverse speed, metal/energy/buildtime cause the unit def to be '''rejected''' (previously clamped to 0.1).
+* Negative values for acceleration and brake rate cause rejection (previously, absolute value was used).
+* Metal cost can now be 0 (undefined metal cost defaults to 0 instead of 1).
+* Weapon <code>edgeEffectiveness</code> can now be exactly 1 (previously capped at 0.999).
+* Weapon damage and unit armor multiplier can now be 0.
+
+=== trackStretch Reciprocal Change ===
+
+The unit def <code>trackStretch</code> values are now treated reciprocally. A stretch factor of 2 now means the track is stretched 2× longer (previously it was squeezed 0.5× shorter). Adjust your values accordingly.
+
+=== GroundDecals Springsetting ===
+
+The <code>GroundDecals</code> springsetting is now a boolean. The previous behavior of using it as a decal duration multiplier is gone. Use the new <code>scarTTL</code> weapon def tag to set scar durations instead. Note: if you had explicitly set <code>scarTTL</code> values, those are now used directly as the TTL (previously they were multiplied by the ground decal level, which defaulted to 3).
+
+=== Live Unit Footprint Size ===
+
+Live mobile units' footprint is now the size of their movedef (previously the unit def footprint). This affects bugger-off behavior, construction blocking, and the size of the built-in selection square. Unit defs are unaffected; individual units adjust if their movedef changes at runtime.
+
+== Gameplay Behavior ==
+
+=== Stop Command on Manual Share ===
+
+Manually shared units no longer receive the Stop command automatically. To replicate the old behavior, use the <code>UnitGiven</code> callin in a gadget or widget:
+
+<syntaxhighlight lang="lua">
+function wupget:UnitGiven(unitID, unitDefID, newTeam)
+    if newTeam == Spring.GetMyTeamID() then  -- if in unsynced context
+        Spring.GiveOrderToUnit(unitID, CMD.STOP, 0, 0)
+    end
+end
+</syntaxhighlight>
+
+=== Resurrecting Units ===
+
+Resurrecting units no longer overrides their health to 5%. To restore the old behavior, add a gadget with the following callin:
+
+<syntaxhighlight lang="lua">
+function gadget:UnitCreated(unitID, unitDefID, teamID, builderID)
+    if builderID and Spring.GetUnitWorkerTask(builderID) == CMD.RESURRECT then
+        Spring.SetUnitHealth(unitID, Spring.GetUnitHealth(unitID) * 0.05)
+    end
+end
+</syntaxhighlight>
+
+=== weapons groundBounce ===
+
+Weapons with <code>groundBounce = true</code> will now bounce even if <code>numBounces</code> is undefined. The default value of <code>numBounces = -1</code> now correctly results in infinite bounces instead of 0. Set an explicit positive value of <code>numBounces</code> if you want a finite number of bounces.
+
+=== Default Targeting Priority Random Component Removed ===
+
+The default targeting priority for typed units no longer includes a ±30% random component. Use <code>gadget:AllowWeaponTarget</code> to restore the previous randomized behavior.
+
+=== Handicap No Longer Applies to Reclaim ===
+
+Handicap (resource income multiplier) no longer applies to reclaim operations.
+
+== Camera ==
+
+=== Camera Modifiers ===
+
+The following keyboard modifiers were unhardcoded from the engine:
+
+* '''Spring Camera:''' rotating on the x (pitch) or y (yaw) axis with ALT + middle mouse button while moving the cursor.
+* '''Resetting camera:''' ALT + mousewheel scroll down.
+* '''Pitch rotation:''' CTRL + mousewheel.
+
+If games and players do not change engine defaults, no action is needed. To explicitly enable these modifiers as before, add the following keybindings:
+
+<syntaxhighlight lang="bash">
+bind Any+ctrl movetilt    -- rotates camera over x axis on mousewheel
+bind Any+alt  movereset   -- resets camera state on mousewheel move
+bind Any+alt  moverotate  -- rotates camera in x/y on MMB move (Spring cam)
+</syntaxhighlight>
+
+== Rendering ==
+
+=== LOD Rendering Removed ===
+
+LOD rendering (2D unit billboards when zoomed far out) has been removed, along with the <code>/distdraw</code> command and the <code>UnitLodDist</code> springsetting entry.
+
+=== Dynamic Sky Removed ===
+
+The <code>AdvSky</code> springsetting and the <code>/dynamicsky</code> command (which made clouds move across the sky) have been removed. There is no direct replacement, though similar behavior can be achieved via custom Lua rendering.
+
+=== Screenshot Format Changed ===
+
+The default <code>/screenshot</code> format is now PNG (was previously BMP/other). Review any automated processing pipelines that parse screenshot files. Screenshot and replay demo file names also now use a UTC timestamp format instead of a sequential number.
+
+=== Paletted Image Files ===
+
+Paletted image files are no longer accepted. Convert any paletted images to non-paletted format (e.g. standard RGBA PNG).
+
+=== Shader Changes for Unit Rendering ===
+
+Unit vertex shaders now receive TRS (Translation/Rotation/Scale) transforms instead of matrices. Code that calls <code>vbo:ModelsVBO()</code> must update shader code. The skinning/bones interface at uniform location 5 was extended in version 2025.04 from <code>uvec2</code> to <code>uvec3</code>. Update shaders from:
+
+<syntaxhighlight lang="glsl">
+// Old (pre-1775)
+layout (location = 5) in uint pieceIndex;
+
+// After 1775 (bones/skinning era)
+layout (location = 5) in uvec2 bonesInfo; // boneIDs, boneWeights
+#define pieceIndex (bonesInfo.x & 0x000000FFu)
+
+// After 2025.04 (extended bone info)
+layout (location = 5) in uvec3 bonesInfo; // boneID low byte, boneWeight, boneID high byte
+#define pieceIndex (bonesInfo.x & 0x000000FFu)
+</syntaxhighlight>
+
+== Feature Support Table ==
+
+Recoil provides <code>Engine.FeatureSupport</code>, a table of feature availability flags for forward/backward compatibility. Use it instead of <code>Script.IsEngineMinVersion</code> where applicable, as it is self-documenting and does not assume linear commit numbering.
+
+Example usage:
+
+<syntaxhighlight lang="lua">
+if Engine.FeatureSupport.rmlUiApiVersion then
+    -- use rmlUI
+end
+</syntaxhighlight>
+
+Key entries include:
+
+{| class="wikitable"
+|-
+! Key !! Value !! Notes
+|-
+| <code>rmlUiApiVersion</code> || <code>1</code> || RmlUI GUI framework available
+|-
+| <code>hasExitOnlyYardmaps</code> || <code>true</code> || 'e' yardmap tile available
+|-
+| <code>NegativeGetUnitCurrentCommand</code> || <code>true</code> || Negative indices work in GetUnitCurrentCommand
+|-
+| <code>noAutoShowMetal</code> || <code>false</code> → future <code>true</code> || Automatic metal map toggle deprecation tracking
+|-
+| <code>maxPiecesPerModel</code> || <code>65534</code> || Maximum pieces per model (was 254)
+|}
+
+== Death Event Changes ==
+
+The <code>wupget:UnitDestroyed</code> callin received several changes:
+
+* Now receives a 7th argument: <code>weaponDefID</code>, the cause of death. This is never <code>nil</code> — all causes of death are attributable.
+* The builder is passed as the killer if a unit is reclaimed.
+
+New <code>Game.envDamageTypes</code> constants identify the cause of death:
+
+{| class="wikitable"
+|-
+! Constant !! Description
+|-
+| <code>AircraftCrashed</code> || Aircraft hitting the ground
+|-
+| <code>Kamikaze</code> || Unit exploding via kamikaze ability
+|-
+| <code>SelfD</code> || Self-destruct command and countdown
+|-
+| <code>ConstructionDecay</code> || Abandoned nanoframe disappearing
+|-
+| <code>Reclaimed</code> || Killed via reclaim
+|-
+| <code>TurnedIntoFeature</code> || Died due to <code>isFeature</code> tag on completion
+|-
+| <code>TransportKilled</code> || Was in a transport with no <code>releaseHeld</code> when transport died
+|-
+| <code>FactoryKilled</code> || Was being built in a factory that died
+|-
+| <code>FactoryCancel</code> || Build order was cancelled in factory
+|-
+| <code>UnitScript</code> || COB script ordered the unit's death
+|-
+| <code>SetNegativeHealth</code> || Unit had negative health for non-damage reasons (e.g. set via Lua)
+|-
+| <code>OutOfBounds</code> || Unit was thrown far out of map bounds
+|-
+| <code>KilledByCheat</code> || <code>/remove</code> or <code>/destroy</code> command used
+|-
+| <code>KilledByLua</code> || Default cause when using <code>Spring.DestroyUnit</code>
+|}
+
+<code>KilledByLua</code> is guaranteed to be the last value. You can define custom damage type constants above it:
+
+<syntaxhighlight lang="lua">
+Game.envDamageTypes.MyCustomDeath = Game.envDamageTypes.KilledByLua - 1
+</syntaxhighlight>
+
+== Other Notable Changes ==
+
+=== Python AI Bindings Removed ===
+
+Python bindings for AI have been removed. Only native C++ AIs are built by default via CMake.
+
+=== 32-bit Builds ===
+
+32-bit builds are no longer supported.
+
+=== Mandatory OpenGL Feature Support ===
+
+Support for non-power-of-2 textures, float textures, and framebuffer objects (FBO) is now mandatory. Systems that do not support these (all of which were common 15+ years ago) are no longer supported.
+
+=== /ally Command ===
+
+The <code>/ally</code> command no longer announces the alliance to unrelated players via a console message. The affected players still see the message. Use the <code>TeamChanged</code> callin if you want to make alliance announcements public.
+
+=== Group Command Change ===
+
+<code>/group add N</code> no longer selects the entire group after adding units to it.
+
+=== Automatic Metal View Toggle (Deprecated) ===
+
+The metal view automatically toggling when a player begins building a metal extractor is deprecated. Disable it via <code>Spring.SetAutoShowMetal(false)</code> and re-implement manually. An example widget is available at <code>(basecontent)/examples/Widgets/gui_autoshowmetal.lua</code>.
+
+=== DrawUnit and DrawFeature Widget Callins (Deprecated) ===
+
+Widget drawcalls such as <code>wupget:DrawUnit</code>, <code>wupget:DrawFeature</code>, etc. are deprecated. Migrate to alternative rendering approaches.
+
+=== Removed Springsettings ===
+
+The following springsettings have been removed:
+
+{| class="wikitable"
+|-
+! Springsetting !! Replacement / Notes
+|-
+| <code>AdvSky</code> || No direct replacement; use custom Lua rendering
+|-
+| <code>UnitLodDist</code> || LOD rendering removed entirely
+|-
+| <code>UpdateWeaponVectorsMT</code> || Removed (MT is now always on)
+|-
+| <code>UpdateBoundingVolumeMT</code> || Removed (MT is now always on)
+|-
+| <code>AnimationMT</code> || Removed after proving stable; animations always MT
+|-
+| <code>UsePBO</code> || Already did nothing; removed
+|}
+
+=== Removed Commands ===
+
+{| class="wikitable"
+|-
+! Command !! Notes
+|-
+| <code>/distdraw</code> || LOD rendering removed
+|-
+| <code>/dynamicsky</code> || Dynamic sky removed
+|-
+| <code>/AdvModelShading</code> || Removed
+|}
+
+== See Also ==
+
+* [[Recoil:Choose Recoil]] — Why switch from Spring to Recoil
+* [https://github.com/beyond-all-reason/RecoilEngine/tree/master/doc/site/content/changelogs Full Recoil Changelog]
+* [https://beyond-all-reason.github.io/spring/ldoc/ Recoil Lua API Reference]
+* [https://discord.gg/GUpRg6Wz3e Recoil Discord] — for help and support
+
+[[Category:Recoil]]
+[[Category:Engine]]
+[[Category:Migration]]

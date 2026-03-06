@@ -3,36 +3,37 @@ __TOC__
 
 = Making A Basic Recoil Game =
 
-This guide walks you through creating a minimal but functional game with the Recoil engine.
+This guide walks you through creating a minimal but complete game with the Recoil engine.
 By the end you will have a working game archive that loads in the engine, with a playable Commander unit, a simple weapon, and a basic Lua gadget.
-No prior Spring or Recoil experience is assumed, though familiarity with Lua is helpful.
 
-{{warning|1=This guide targets the current Recoil engine. If you are migrating an existing Spring 105 game, see [[Recoil:Migrating From Spring]] for a list of breaking changes.}}
+No prior Spring or Recoil experience is assumed, though basic familiarity with Lua will help when you reach the scripting sections.
+
+{{note|1=Recoil is descended from the Spring engine and is highly compatible with Spring 105 games and mods. If you are migrating an existing Spring game, the bulk of your content will work as-is — see [[Recoil:Migrating From Spring]] for the specific breaking changes.}}
 
 ----
 
 == 1. What is Recoil? ==
 
-Recoil is an open-source, cross-platform RTS game engine descended from Spring (which itself descended from Total Annihilation).
-It provides out of the box:
+Recoil is an open-source, cross-platform real-time strategy game engine descended from [[Spring]] (which itself descended from Total Annihilation).
+The engine handles low-level simulation, networking, and rendering.
+Your game is a Lua + asset package that rides on top of the engine: you control the rules, the units, the UI, and everything else.
 
-* '''Physics simulation''' — projectile trajectories, terrain collision, unit movement
+Out of the box the engine provides:
+
+* '''Physics simulation''' — projectile trajectories, terrain collision, unit movement and pathfinding
 * '''Resource system''' — metal and energy by default, fully customisable
-* '''Networking''' — authoritative server, deterministic lockstep simulation, replays
+* '''Networking''' — authoritative server, deterministic lock-step simulation, automatic replay recording
 * '''Lua scripting''' — every mechanic is overridable via Lua gadgets and widgets
-* '''VFS''' — a virtual file system that loads content from game archives, maps, and basecontent
-
-Your game is a Lua + asset package that rides on top of the engine.
-You control the rules, the units, the UI, and everything else; the engine provides the platform.
+* '''VFS''' — a virtual file system that merges your game archive, maps, and basecontent into one namespace
 
 === Key terminology ===
 
 {| class="wikitable"
 ! Term !! Meaning
 |-
-| '''Game''' || Your content archive loaded by the engine (units, Lua scripts, textures, etc.)
+| '''Game''' || Your content archive (units, Lua scripts, textures, …) loaded by the engine.
 |-
-| '''Map''' || The terrain archive (.smf height data + textures). Distributed separately from the game.
+| '''Map''' || A separate terrain archive (.smf height data + textures). Distributed independently of your game.
 |-
 | '''Gadget''' || A Lua script that runs game logic (synced or unsynced). Lives in <code>luarules/gadgets/</code>.
 |-
@@ -40,17 +41,19 @@ You control the rules, the units, the UI, and everything else; the engine provid
 |-
 | '''Wupget''' || Informal collective term for widgets and gadgets.
 |-
-| '''Callin''' || A function in your Lua code that the engine calls (e.g. <code>gadget:UnitCreated</code>).
+| '''Callin''' || A function in your Lua code that the engine calls on events (e.g. <code>gadget:UnitCreated</code>).
 |-
 | '''Callout''' || A function the engine exposes to Lua (e.g. <code>Spring.GetUnitPosition</code>).
 |-
-| '''VFS''' || Virtual File System — unified view of game archive, map archive, basecontent.
+| '''VFS''' || Virtual File System — unified read-only view of the game archive, map archive, and basecontent.
 |-
-| '''Basecontent''' || Engine-bundled archive with default handlers, water textures, and other bare necessities.
+| '''Basecontent''' || An archive always loaded by the engine that provides default wupget handlers, water textures, and other bare necessities.
 |-
-| '''.sdd''' || Development game folder (name must end in <code>.sdd</code>). Equivalent to an archive but uncompressed.
+| '''.sdd''' || A game folder whose name ends in <code>.sdd</code>. Treated as an uncompressed archive during development.
 |-
-| '''.sdz''' || Production game archive (renamed .zip). Faster to distribute and load.
+| '''.sdz / .sd7''' || Production game archives (zip and 7-zip respectively). Faster to distribute and load than .sdd.
+|-
+| '''Elmo''' || The internal distance unit. Roughly 8 height units of map height. Used in unit defs for speed, range, etc.
 |}
 
 ----
@@ -59,281 +62,291 @@ You control the rules, the units, the UI, and everything else; the engine provid
 
 Before starting you need:
 
-# '''The Recoil engine binary.''' Download a pre-built release from [https://github.com/beyond-all-reason/RecoilEngine/releases GitHub Releases] or build from source. The main executable is <code>spring</code> (or <code>spring.exe</code> on Windows).
-# '''A map archive''' (<code>.smf</code> / <code>.sd7</code>) placed in the <code>maps/</code> subfolder of your Recoil data directory. Any map from an existing Recoil game works for testing. Map archives and game archives live in separate directories.
-# '''A text editor.''' Any editor works. For the best experience, set up the [[Recoil:Lua Language Server|Lua Language Server]] with Recoil type stubs so you get autocomplete on all <code>Spring.*</code> functions.
+# '''The Recoil engine binary.''' Download a pre-built release from [https://github.com/beyond-all-reason/RecoilEngine/releases GitHub Releases] or build from source following the [https://github.com/beyond-all-reason/RecoilEngine/blob/master/docker-build-v2/README.md build documentation]. The main executable is <code>spring</code> on Linux or <code>spring.exe</code> on Windows.
+# '''A map archive''' (<code>.smf</code> / <code>.sd7</code>) placed in the <code>maps/</code> subfolder of your Recoil data directory. Any map from an existing Recoil game works for early testing.
+# '''A text editor.''' Any editor works. For the best experience, configure the [[Recoil:Lua Language Server]] with Recoil type stubs so you get autocomplete on all <code>Spring.*</code> functions.
 
 Your Recoil data directory typically looks like:
 
 <pre>
 recoil-data/
-├── spring           ← engine binary (linux) or spring.exe (windows)
-├── spring_headless  ← headless binary (no rendering)
-├── spring_dedicated ← dedicated server binary
-├── games/           ← your game archives / folders go here
-├── maps/            ← map archives go here
-└── (engine config files)
+├── spring            ← engine binary (Linux) or spring.exe (Windows)
+├── spring_headless   ← headless binary (no rendering; useful for automated testing)
+├── spring_dedicated  ← dedicated server binary
+├── games/            ← your game archives / development folders go here
+└── maps/             ← map archives go here
 </pre>
 
 ----
 
-== 3. Game Archive Structure ==
+== 3. Virtual File System ==
 
-During development use an <code>.sdd</code> folder — it's just a normal directory the engine treats as an archive.
-Create it inside your <code>games/</code> directory:
+The engine loads content from several sources, merged into one Virtual File System (VFS):
+
+* '''Game archive''' — your <code>.sdd</code> folder or <code>.sdz</code>/<code>.sd7</code> file. Files here have the highest priority.
+* '''Map archive''' — the terrain and map-specific data. Maps can override some of your game's properties via <code>MapOptions.lua</code>.
+* '''Basecontent''' — always loaded by the engine. Provides the default wupget handler framework, stock water textures, and other bare essentials.
+
+Game archives can declare dependencies on other archives in <code>modinfo.lua</code>.
+The engine merges all archives into the VFS, with your game taking priority over its dependencies.
+This lets you build on top of an existing game without copying its entire asset tree.
+
+{{note|1=Files in a dependency are completely overridden if your game provides a file at the same path. There is currently no way to partially merge files.}}
+
+See [[Recoil:VFS Basics]] for the full list of VFS modes available to Lua scripts.
+
+----
+
+== 4. Game Archive Structure ==
+
+During development, use an <code>.sdd</code> folder. Create it inside your <code>games/</code> directory:
 
 <pre>
 games/
 └── mygame.sdd/
-    ├── modinfo.lua          ← required: identifies your game to the engine
-    ├── units/               ← unit definition files
-    │   └── commander.lua
-    ├── weapons/             ← weapon definition files
-    │   └── laser.lua
-    ├── features/            ← feature (prop/wreck) definitions
-    ├── gamedata/            ← def pre/post processing, options
+    ├── modinfo.lua           ← required: identifies your game to the engine
+    ├── gamedata/             ← def pre/post processing, game options, rules
+    │   ├── modrules.lua
     │   ├── unitdefs_post.lua
-    │   └── modrules.lua
+    │   └── ModOptions.lua
+    ├── units/                ← unit definition files (one per unit by convention)
+    │   └── commander.lua
+    ├── weapons/              ← weapon definition files
+    │   └── laser.lua
+    ├── features/             ← feature (prop/wreck/tree) definitions
+    │   └── trees.lua
     ├── luarules/
-    │   └── gadgets/         ← synced and unsynced game logic
+    │   └── gadgets/          ← synced and unsynced game logic
     │       └── game_end.lua
     ├── luaui/
-    │   └── widgets/         ← UI scripts
-    ├── objects3d/           ← unit models (.dae / .obj / .s3o)
-    ├── unittextures/        ← unit icon textures (unitname.png)
-    └── maps/                ← embedded map resources (optional)
+    │   └── widgets/          ← UI scripts
+    │       └── resources_display.lua
+    ├── objects3d/            ← unit models (.dae / .obj / .s3o)
+    └── unittextures/         ← unit icon textures (unitname.png)
 </pre>
 
 {{warning|1=The <code>.sdd</code> extension on the folder name is mandatory. Without it the engine will not recognise it as a game archive.}}
 
-For production, compress the contents into a <code>.sdz</code> (zip) archive or <code>.sd7</code> (7-zip) archive.
-The folder contents become the archive root — <code>modinfo.lua</code> should be at the top level.
-
-=== VFS and dependencies ===
-
-Your game archive can declare '''dependencies''' on other archives (including other games) via <code>modinfo.lua</code>.
-The engine merges all archives into the VFS.
-Files in your game take priority over dependencies.
-This means you can build on an existing game without copying its assets.
-
-See [[Recoil:VFS Basics]] for full details on VFS modes and the load order.
+For production, compress the contents into a <code>.sdz</code> or <code>.sd7</code> archive.
+<code>modinfo.lua</code> must end up at the archive root — not inside a subfolder.
 
 ----
 
-== 4. modinfo.lua ==
+== 5. modinfo.lua ==
 
-<code>modinfo.lua</code> is the single most important file — without it the engine will not recognise your archive as a game.
+<code>modinfo.lua</code> is the most important file in your archive. Without it the engine will not recognise it as a game.
 
-<syntaxhighlight lang="lua">
+<pre>
 -- games/mygame.sdd/modinfo.lua
 
 local modinfo = {
     -- Displayed in lobbies and the engine title bar
-    name    = "My Recoil Game",
-    -- Short unique identifier used internally; no spaces, keep it stable
-    shortName = "MRG",
-    -- Shown to players in lobby browsers and descriptions
+    name        = "My Recoil Game",
+    -- Short unique identifier; no spaces, keep it stable across versions
+    shortName   = "MRG",
     description = "A minimal Recoil game for learning purposes.",
-    -- Semantic version string
-    version = "0.1.0",
-    -- Mutator name; leave empty for base games (not mods on top of other games)
-    mutator = "",
-    -- Archive names this game depends on; engine always loads basecontent itself
-    depend  = {},
-    -- Replaces list: names of games this game supersedes in rapid/lobby
-    replace = {},
-    -- URL shown in lobby if a player does not have the game
-    modtype = 1,  -- 1 = game/mod, 0 = hidden
-    -- Primary unit sides available to players
-    -- These correspond to the "Side" key in start scripts and unit defs
-    sides   = { "MyFaction" },
-    -- For each side, which unit the engine spawns as the starting unit
+    version     = "0.1.0",
+    -- Leave empty for base games (not mods layered on top of another game)
+    mutator     = "",
+    -- Other archive names this game depends on; basecontent is always loaded
+    depend      = {},
+    -- 1 = game/mod (visible in lobbies), 0 = hidden
+    modtype     = 1,
+    -- Faction names available in start scripts and team configuration
+    sides       = { "MyFaction" },
+    -- Per-side starting unit def name
     startscreens = {
-        MyFaction = "commander",   -- references a unit def name
+        MyFaction = "commander",
     },
 }
 
 return modinfo
-</syntaxhighlight>
+</pre>
 
-{{warning|1=<code>shortName</code> must be unique across all games the engine knows about. Pick something distinctive. Changing it later breaks lobby integrations and replays.}}
+{{warning|1=<code>shortName</code> must be unique across all games the engine knows about. Changing it later breaks lobby integrations and replay compatibility.}}
 
 === ModOptions.lua ===
 
-To expose configurable options in lobbies (e.g. starting resources, game mode), add a <code>gamedata/ModOptions.lua</code>:
+To expose configurable options in lobbies (sliders, checkboxes, dropdowns), add <code>gamedata/ModOptions.lua</code>:
 
-<syntaxhighlight lang="lua">
+<pre>
 -- gamedata/ModOptions.lua
--- Returned options appear as sliders/checkboxes/dropdowns in lobby UIs.
 
 return {
     {
-        key     = "startmetal",
-        name    = "Starting Metal",
-        desc    = "Amount of metal each player starts with.",
-        type    = "number",
-        def     = 1000,
-        min     = 0,
-        max     = 10000,
-        step    = 100,
+        key  = "startmetal",
+        name = "Starting Metal",
+        desc = "Metal each player starts with.",
+        type = "number",
+        def  = 1000,
+        min  = 0,
+        max  = 10000,
+        step = 100,
     },
     {
-        key     = "commanderdie",
-        name    = "Commander Death Ends Game",
-        desc    = "Lose when your Commander is destroyed.",
-        type    = "bool",
-        def     = true,
+        key  = "commanderdie",
+        name = "Commander Death Ends Game",
+        desc = "Lose when your Commander is destroyed.",
+        type = "bool",
+        def  = true,
     },
 }
-</syntaxhighlight>
+</pre>
 
-Options are readable in gadgets via <code>Spring.GetModOptions()</code>.
+Read options at runtime in gadgets with <code>Spring.GetModOptions()</code>.
 
 ----
 
-== 5. Your First Unit Definition ==
+== 6. Unit Definitions ==
 
 Unit defs are Lua files in <code>units/</code> that return a table of unit type definitions.
 The convention is one unit per file, where the filename matches the unit def name.
 
-<syntaxhighlight lang="lua">
+<pre>
 -- units/commander.lua
--- The starting unit for the MyFaction side.
 
 return {
     commander = {
         -- ── Display ──────────────────────────────────────────────────
         name        = "Commander",
-        description = "The starting unit. Its death ends the game.",
-        -- Path to the icon shown in the unit HUD (unittextures/commander.png)
-        buildPic    = "commander.png",
+        description = "The starting unit.",
+        buildPic    = "commander.png",   -- icon shown in unit HUD
 
         -- ── Model ────────────────────────────────────────────────────
-        -- Path inside the archive (objects3d/commander.dae)
-        objectName  = "commander.dae",
+        objectName  = "commander.dae",   -- path inside objects3d/
 
-        -- ── Physics ──────────────────────────────────────────────────
-        -- Maximum health points
+        -- ── Health ───────────────────────────────────────────────────
         health      = 3000,
-        -- Armour class name; controls damage reduction from weapon types
-        armorType   = "commander",
-        -- Size of the footprint in map squares (8 elmos each)
-        footprintX  = 2,
+        armorType   = "commander",       -- armour class name
+
+        -- ── Footprint ────────────────────────────────────────────────
+        footprintX  = 2,                 -- width in map squares (8 elmos each)
         footprintZ  = 2,
-        -- The height of the collision sphere
         collisionVolumeScales = "30 50 30",
         collisionVolumeType   = "ellipsoid",
 
         -- ── Movement ─────────────────────────────────────────────────
-        -- Movement class name; references a MoveClass def (see MoveClasses below)
         moveDef = {
-            family      = "tank",
-            -- Units above this slope can't be traversed
-            maxSlope    = 36,
-            -- Turns per second at max speed
-            turnRate    = 1024,
+            family   = "tank",
+            maxSlope = 36,     -- steepest traversable slope in degrees
+            turnRate = 1024,
         },
-        -- Maximum speed in elmos/second
-        maxVelocity = 42,
-        -- Acceleration in elmos/second²
-        maxAcc      = 0.5,
-        -- Braking in elmos/second²
+        maxVelocity = 42,      -- elmos/second
+        maxAcc      = 0.5,     -- elmos/second²
         maxDec      = 1.5,
 
         -- ── Construction ─────────────────────────────────────────────
-        -- How many build power units this unit provides
-        workerTime  = 200,
-        -- How much metal it costs to build
-        buildCostMetal  = 0,     -- Commanders are free (spawned by engine)
+        workerTime      = 200, -- build power provided when assisting
+        buildCostMetal  = 0,   -- Commanders are spawned free by the engine
         buildCostEnergy = 0,
-        -- Build time in seconds at 1 build power
-        buildTime   = 1,
+        buildTime       = 1,
 
-        -- ── Energy and Metal Production ───────────────────────────────
-        metalMake   = 1,      -- passively trickles 1 metal/second
-        energyMake  = 20,     -- passively generates 20 energy/second
+        -- ── Economy ──────────────────────────────────────────────────
+        metalMake  = 1,        -- passive metal income per second
+        energyMake = 20,       -- passive energy income per second
 
         -- ── Weapons ──────────────────────────────────────────────────
-        -- Up to 3 weapons can be listed; name references a weapon def
         weapons = {
             { def = "COMMANDER_LASER" },
         },
 
-        -- ── Self-Destruct ─────────────────────────────────────────────
-        selfDExplosion = "commander_sdc",  -- optional; a weapon def name
-
         -- ── Misc ─────────────────────────────────────────────────────
-        -- Used in start scripts to assign this unit as Commander
-        commander   = true,
-        -- Sight radius in elmos
+        commander     = true,  -- marks this as the starting Commander unit
         sightDistance = 660,
-        -- Radar range in elmos (0 = no radar)
-        radarDistance = 0,
     },
 }
-</syntaxhighlight>
+</pre>
 
-{{warning|1=Key names in unit def files are '''case-insensitive''' as far as the engine is concerned, but Lua itself is case-sensitive. Adopt a consistent convention (all lowercase is common) and use <code>lowerkeys()</code> in <code>gamedata/unitdefs_post.lua</code> if you mix styles.}}
+{{warning|1=The <code>UnitDefs</code> table available inside gadgets and widgets is '''not''' the same table as the one in def files. After loading, the engine parses definitions into internal structures and re-exposes them with different key names (e.g. <code>buildCostMetal</code> becomes <code>metalCost</code>) and different value scales. Never copy-paste keys between def files and wupget code.}}
 
 === Notable unit def keys ===
 
 {| class="wikitable"
 ! Key !! Type !! Notes
 |-
-| <code>name</code> || string || Display name in UI. Not the def name (the Lua table key).
+| <code>name</code> || string || Display name shown in the UI. Not the same as the def name (the Lua table key).
 |-
-| <code>health</code> || number || Max HP.
+| <code>health</code> || number || Maximum hit points.
 |-
-| <code>moveDef</code> || table || Inline move class definition. See engine docs for all fields.
+| <code>armorType</code> || string || Armour class name. Controls how much damage weapons of each type deal.
 |-
-| <code>maxVelocity</code> || number || Elmos per second. 1 elmo ≈ 8 map height units.
+| <code>moveDef</code> || table || Inline movement class. <code>family</code> can be <code>tank</code>, <code>kbot</code>, <code>hover</code>, <code>ship</code>, <code>boat</code>, <code>amphibious</code>, <code>submarine</code>, or <code>air</code>.
 |-
-| <code>buildCostMetal</code> || number || Metal cost. Constructor must have enough resources to start building.
+| <code>maxVelocity</code> || number || Top speed in elmos/second.
 |-
-| <code>buildTime</code> || number || Seconds to build at 1 build power. Actual time = buildTime / workerTime.
+| <code>buildCostMetal</code> || number || Metal cost. Constructor must have enough free income to begin building.
 |-
-| <code>workerTime</code> || number || Build power this unit contributes when constructing.
+| <code>buildTime</code> || number || Build time in seconds at 1 build power. Actual time = <code>buildTime / workerTime</code>.
 |-
-| <code>weapons</code> || table || Up to 3 entries; each entry is a table with a <code>def</code> key naming a WeaponDef.
+| <code>workerTime</code> || number || Build power this unit contributes when constructing or assisting.
 |-
-| <code>commander</code> || bool || Marks this unit as a Commander. Lobby UI and engine use this.
+| <code>weapons</code> || table || Up to 3 entries; each a table with a <code>def</code> key naming a WeaponDef.
 |-
-| <code>customParams</code> || table || Arbitrary key/value pairs preserved by the engine for gadget use.
+| <code>commander</code> || bool || Marks this unit as a Commander for lobby/engine purposes.
+|-
+| <code>extractsMetal</code> || number || > 0 means this unit extracts metal when placed over a metal spot.
+|-
+| <code>customParams</code> || table || Arbitrary string/number key-value pairs preserved by the engine for gadget use.
 |}
 
-For the full list of unit def keys and their effects, see the [https://beyond-all-reason.github.io/spring/ldoc/ Recoil Lua API documentation].
+For the full list of unit def keys and their effects see the [https://beyond-all-reason.github.io/spring/ldoc/ Recoil Lua API documentation].
+
+=== Unit types overview ===
+
+Recoil games traditionally group units into several broad categories.
+Understanding these helps when designing your roster:
+
+; '''Ground vehicles''' (family: <code>tank</code>)
+: Typically heavy armour, strong weapons, poor slope climbing. Sluggish turning, struggles on hills. Best for open terrain and armour-versus-armour engagements.
+
+; '''K-bots / bipeds''' (family: <code>kbot</code>)
+: Lighter and cheaper than vehicles. Excellent slope climbing — can go where tanks cannot. Smaller profile, so they slip through narrow gaps in terrain or walls.
+
+; '''Aircraft''' (family: <code>air</code>)
+: Ignores terrain completely. Fastest units. Roles: bombers, gunships, scouts, air superiority fighters, torpedo bombers, transports. Countered by anti-air (AA) units and structures. Expensive and fragile compared to ground units.
+
+; '''Ships''' (family: <code>ship</code> / <code>boat</code>)
+: Powerful weapons and heavy armour, but confined to water. Long effective range. Very expensive. Vulnerable to submarines and aircraft with torpedoes.
+
+; '''Hovercraft''' (family: <code>hover</code>)
+: Amphibious — traverse both land and water. Weaker than dedicated land vehicles and ships, but unique in their flexibility. Poor slope climbing.
+
+; '''Amphibious units''' (family: <code>amphibious</code>)
+: Can operate both underwater and on the surface. Slow. Excellent for surprise attacks and on maps with mixed terrain.
+
+; '''Structures / towers'''
+: Fixed-position buildings. Includes factories, resource extractors, power generators, defence turrets, radar towers, and storage. Cannot move.
 
 === Def pre- and post-processing ===
 
-The engine reads <code>gamedata/defs.lua</code> (provided by basecontent) which orchestrates def loading.
-It first executes <code>gamedata/unitdefs_pre.lua</code> (if present) to populate a <code>Shared</code> table visible to all unit def files, then loads every <code>units/*.lua</code> file, and finally runs <code>gamedata/unitdefs_post.lua</code>.
+The engine reads <code>gamedata/defs.lua</code> (provided by basecontent) to orchestrate def loading.
+It runs <code>gamedata/unitdefs_pre.lua</code> first (populates a <code>Shared</code> table visible to all def files), then loads every <code>units/*.lua</code>, then runs <code>gamedata/unitdefs_post.lua</code>.
 
-<syntaxhighlight lang="lua">
+<pre>
 -- gamedata/unitdefs_post.lua
--- Normalize key casing and apply game-wide tweaks.
 
+-- Normalise key casing so post-processing code is consistent
 for _, unitDef in pairs(UnitDefs) do
-    -- lowerkeys() is provided by basecontent; makes all keys lowercase
-    lowerkeys(unitDef)
+    lowerkeys(unitDef)   -- lowerkeys() is provided by basecontent
 end
 
--- Example: give all units 10% extra health
+-- Example: give every unit 10% bonus health
 for _, unitDef in pairs(UnitDefs) do
     if unitDef.health then
         unitDef.health = unitDef.health * 1.1
     end
 end
-</syntaxhighlight>
+</pre>
 
-{{warning|1=The <code>UnitDefs</code> table inside gadgets/widgets is '''not the same''' as the one in post-processing. After loading, the engine parses the def tables into internal structures and re-exposes them with different key names and value scales. Never copy-paste keys between def files and wupget code.}}
+{{note|1=<code>lowerkeys()</code> converts all keys to lowercase in-place. If your def files are consistent in their casing you don't need it, but it prevents subtle bugs when multiple contributors write defs in different styles.}}
 
 ----
 
-== 6. Weapon Definitions ==
+== 7. Weapon Definitions ==
 
 Weapon defs follow the same pattern as unit defs — Lua files in <code>weapons/</code> returning tables.
 
-<syntaxhighlight lang="lua">
+<pre>
 -- weapons/laser.lua
 
 return {
@@ -341,137 +354,271 @@ return {
         name        = "Commander Laser",
         description = "Short-range direct-fire laser.",
 
-        -- Weapon category controls which targets it can engage
-        -- Options: ground, air, sea, land, building, etc. (combinable)
-        onlyTargetCategory = "SURFACE",
-
-        -- ── Visuals ───────────────────────────────────────────────────
-        -- Weapon class drives the physics model
+        -- Weapon physics model
         -- Options: Cannon, LaserCannon, MissileLauncher, AircraftBomb,
         --          BeamLaser, LightningCannon, Flame, TorpedoLauncher, ...
-        weaponType    = "LaserCannon",
-        -- Colour of the beam/tracer (R G B A each 0-255)
-        rgbColor      = "1 0.2 0.2",
-        -- Colour at the other end of the beam (optional)
-        rgbColor2     = "1 0.9 0.9",
-        -- Visual length of the laser beam in elmos
-        beamtime      = 1,
-        -- Thickness of the beam in pixels
-        thickness     = 3,
-        corethickness = 0.3,
-        laserflaresize = 8,
+        weaponType  = "LaserCannon",
 
-        -- ── Ballistics ────────────────────────────────────────────────
-        -- Projectile/beam speed in elmos/second
-        projectilespeed  = 800,
-        -- Range in elmos
-        range            = 350,
-        -- Reload time in seconds
-        reloadtime       = 1.5,
-        -- Burst: number of shots per fire command
-        burst            = 1,
-        -- Spread in degrees (0 = perfectly accurate)
-        accuracy         = 0,
+        -- Only engage targets in these categories
+        onlyTargetCategory = "SURFACE",
 
-        -- ── Damage ────────────────────────────────────────────────────
+        -- ── Visuals ──────────────────────────────────────────────────
+        rgbColor        = "1 0.2 0.2",    -- beam colour (R G B, 0-1 each)
+        rgbColor2       = "1 0.9 0.9",    -- colour at the far end of the beam
+        beamtime        = 1,              -- visual beam length in elmos
+        thickness       = 3,
+        corethickness   = 0.3,
+        laserflaresize  = 8,
+
+        -- ── Ballistics ───────────────────────────────────────────────
+        projectilespeed = 800,  -- elmos/second
+        range           = 350,  -- elmos
+        reloadtime      = 1.5,  -- seconds between shots
+        burst           = 1,    -- shots per fire command
+        accuracy        = 0,    -- spread in degrees (0 = perfect accuracy)
+
+        -- ── Damage ───────────────────────────────────────────────────
         damage = {
-            -- 'default' applies to all armour types not explicitly listed
-            default = 50,
+            default = 50,       -- applies to armour types not explicitly listed
         },
-        -- Area of effect in elmos (0 = single target)
-        areaOfEffect     = 8,
-        -- Impulse applied to targets on hit (0 = none)
-        impulse          = 0,
-        -- Does this weapon set things on fire?
-        firestarter      = 0,
+        areaOfEffect = 8,   -- splash radius in elmos (0 = single target)
+        impulse      = 0,   -- knockback force
+        firestarter  = 0,   -- chance to ignite (0 = no fire)
     },
 }
-</syntaxhighlight>
+</pre>
 
-Like unit defs, you can post-process weapon defs via <code>gamedata/weapondefs_post.lua</code>.
+Like unit defs, you can post-process weapon defs in <code>gamedata/weapondefs_post.lua</code>.
+
+{{note|1=<code>WeaponDefs</code> inside wupgets is '''0-indexed''' (unlike <code>UnitDefs</code> and <code>FeatureDefs</code> which are 1-indexed). Beware of <code>for i = 1, #WeaponDefs do</code> — this will skip the first weapon def.}}
 
 ----
 
-== 7. Feature Definitions ==
+== 8. Feature Definitions ==
 
-Features are non-commandable props: trees, rocks, wrecks, and so on.
-They occupy the map by default via map configuration, or can be spawned by Lua.
-A minimal feature def:
+Features are non-commandable objects on the map: trees, rocks, wreckage, and any other static props.
+They can block pathfinding, provide reclaim value, and leave behind other features when destroyed.
 
-<syntaxhighlight lang="lua">
+<pre>
 -- features/trees.lua
 
 return {
     tree = {
-        description    = "A tree.",
-        -- Model to render
-        object         = "tree.dae",
-        -- Health before the feature is destroyed
-        damage         = 50,
-        -- Metal reclaimed when a constructor takes it apart
-        metal          = 0,
-        -- Energy reclaimed when destroyed or reclaimed
-        energy         = 0,
-        -- Blocks ground unit pathfinding
-        blocking       = true,
-        -- Visible on radar/sonar
-        geoThermal     = false,
-        -- What this feature becomes when destroyed (nil = nothing)
-        deathFeature   = "",
-        -- Whether this can be reclaimed by a constructor
-        reclaimable    = true,
+        description = "A tree.",
+        object      = "tree.dae",   -- model in objects3d/
+        damage      = 50,           -- HP before the feature is destroyed
+        metal       = 0,            -- metal gained when reclaimed
+        energy      = 10,           -- energy gained when reclaimed
+        blocking    = true,         -- blocks ground unit pathfinding
+        reclaimable = true,
+        deathFeature = "",          -- feature name to spawn on death (blank = nothing)
     },
 }
-</syntaxhighlight>
+</pre>
+
+{{tip|1=Trees are provided by basecontent (<code>treetype0</code> through <code>treetype16</code>), so you don't need to define them unless you want custom trees.}}
 
 ----
 
-== 8. Game Rules (modrules.lua) ==
+== 9. Game Rules (modrules.lua) ==
 
-<code>gamedata/modrules.lua</code> is read by basecontent's <code>defs.lua</code> to configure fundamental engine behaviour that is not driven by unit/weapon defs.
+<code>gamedata/modrules.lua</code> configures engine-level behaviour not driven by unit or weapon defs.
 
-<syntaxhighlight lang="lua">
+<pre>
 -- gamedata/modrules.lua
 
 return {
     system = {
-        -- Starting resources (also overridable via ModOptions / start script)
+        -- Starting resources (also overridable via ModOptions or start script)
         startMetal  = 1000,
         startEnergy = 1000,
 
         -- Maximum units per team (0 = unlimited)
         maxUnits    = 1000,
 
-        -- Commander handling: 0 = game continues, 1 = game ends, 2 = lineage
+        -- 0 = game continues on Commander death
+        -- 1 = team loses when Commander dies
+        -- 2 = lineage mode (Commander transferred to surviving ally)
         gameMode    = 1,
 
-        -- Limit on repair speed (% of max health per second; 0 = unlimited)
+        -- Repair speed cap (% max health per second; 0 = unlimited)
         repairSpeed = 0,
 
-        -- Whether resurrect restores health
+        -- Whether resources are recovered when resurrecting a unit
         resurrectHealth = false,
 
-        -- Resource multiplier for reclaiming metal from living units
+        -- Metal recovered when reclaiming a living unit (1 = full cost)
         reclaimUnitMethod = 1,
 
-        -- Whether ground features leave wrecks
+        -- Whether destroyed units leave wreck features
         featureDeathResurrect = true,
     },
-    sound = {
-        -- Optional: override specific engine sound events
-    },
 }
-</syntaxhighlight>
+</pre>
 
 ----
 
-== 9. Running Your Game ==
+== 10. Lua Scripting ==
 
-The engine is launched with a '''start script''' — a plain text file (conventionally <code>.sdf</code>) that describes who is playing, which game, and which map.
+Lua is the scripting language for everything above the engine's C++ layer.
+The engine provides several isolated Lua environments:
+
+{| class="wikitable"
+! Environment !! Entry point !! Purpose
+|-
+| '''LuaRules''' (synced) || <code>luarules/main.lua</code> || Authoritative game logic. All clients run the same code to stay in sync.
+|-
+| '''LuaRules''' (unsynced) || <code>luarules/draw.lua</code> || Effects and UI driven by game logic but not part of the simulation.
+|-
+| '''LuaUI''' || <code>luaui/main.lua</code> || Player-facing UI: HUD, minimap overlays, build menus, etc.
+|-
+| '''LuaGaia''' || <code>luagaia/main.lua</code> || Logic for the neutral Gaia team (wrecks, map features, world events).
+|-
+| '''LuaIntro''' || <code>luaintro/main.lua</code> || Loading screen and pre-game briefings.
+|-
+| '''LuaMenu''' || <code>luamenu/main.lua</code> || Main menu (pre-game). Requires a menu archive.
+|}
+
+Basecontent provides default <code>main.lua</code> entry points and the wupget handler boilerplate so you can start writing gadgets and widgets without building a handler yourself.
+
+=== Synced vs unsynced ===
+
+* '''Synced''' code participates in the game simulation. All clients run exactly the same instructions in exactly the same order — this is what keeps the game deterministic. Only synced code can affect units, resources, or any other simulation state.
+* '''Unsynced''' code runs on each client independently. It can read simulation state for display purposes, but cannot modify it. UI, rendering, and sound belong here.
+
+{{warning|1=Calling unsynced functions from synced code causes a desync error. When writing gadgets, guard appropriately with <code>gadgetHandler:IsSyncedCode()</code>.}}
+
+=== Your first gadget ===
+
+A gadget is a Lua file loaded by the gadget handler from <code>luarules/gadgets/</code>.
+
+<pre>
+-- luarules/gadgets/game_end.lua
+-- Ends the game when a team's Commander is destroyed.
+
+local gadget = gadget ---@type Gadget
+
+function gadget:GetInfo()
+    return {
+        name    = "Game End Conditions",
+        desc    = "Ends the game on Commander death.",
+        author  = "YourName",
+        date    = "2025",
+        license = "GNU GPL, v2 or later",
+        layer   = 0,
+        enabled = true,
+    }
+end
+
+-- Only run the logic in synced mode
+if not gadgetHandler:IsSyncedCode() then return end
+
+-- Track alive Commanders by team
+local commanderByTeam = {}
+
+function gadget:UnitFinished(unitID, unitDefID, teamID)
+    local def = UnitDefs[unitDefID]
+    if def and def.isCommander then
+        commanderByTeam[teamID] = unitID
+    end
+end
+
+function gadget:UnitDestroyed(unitID, unitDefID, teamID)
+    if commanderByTeam[teamID] == unitID then
+        commanderByTeam[teamID] = nil
+        local allyTeamID = Spring.GetTeamAllyTeamID(teamID)
+        local hasCommander = false
+        for _, ally in ipairs(Spring.GetTeamList(allyTeamID)) do
+            if commanderByTeam[ally] then
+                hasCommander = true
+                break
+            end
+        end
+        if not hasCommander then
+            Spring.GameOver({ allyTeamID })
+        end
+    end
+end
+</pre>
+
+=== Your first widget ===
+
+A widget is a Lua file loaded by the widget handler from <code>luaui/widgets/</code>.
+
+<pre>
+-- luaui/widgets/resources_display.lua
+-- Draws current metal and energy in the corner of the screen.
+
+local widget = widget ---@type Widget
+
+function widget:GetInfo()
+    return {
+        name    = "Resources Display",
+        desc    = "Shows current resource totals.",
+        author  = "YourName",
+        date    = "2025",
+        license = "GNU GPL, v2 or later",
+        layer   = 0,
+        enabled = true,
+    }
+end
+
+function widget:DrawScreen()
+    local metal, _, metalIncome = Spring.GetTeamResources(Spring.GetMyTeamID(), "metal")
+    local energy, _, energyIncome = Spring.GetTeamResources(Spring.GetMyTeamID(), "energy")
+    if not metal then return end
+
+    gl.Color(1, 1, 1, 1)
+    gl.Text(string.format("Metal: %.0f (+%.1f/s)", metal, metalIncome), 10, 60, 14, "s")
+    gl.Text(string.format("Energy: %.0f (+%.1f/s)", energy, energyIncome), 10, 40, 14, "s")
+end
+</pre>
+
+=== Callins and callouts ===
+
+'''Callins''' are functions in your code the engine invokes at the right moment: <code>UnitCreated</code>, <code>UnitDestroyed</code>, <code>GameOver</code>, <code>DrawScreen</code>, <code>Update</code>, and many more.
+You can list all available callins at runtime with <code>Script.GetCallInList()</code>.
+
+'''Callouts''' are <code>Spring.*</code> functions you call into the engine: <code>Spring.GetTeamResources</code>, <code>Spring.GiveOrderToUnit</code>, <code>Spring.Echo</code>, etc.
+The full reference is at [https://beyond-all-reason.github.io/spring/ldoc/ beyond-all-reason.github.io/spring/ldoc/].
+
+=== Communicating between environments ===
+
+The Lua environments are isolated from each other by design.
+Common bridges:
+
+{| class="wikitable"
+! Method !! Direction !! Notes
+|-
+| <code>WG</code> / <code>GG</code> table || Within one environment || Widgets share the global <code>WG</code> table; gadgets share <code>GG</code>.
+|-
+| <code>SendToUnsynced</code> / <code>RecvFromSynced</code> || Synced → Unsynced || Pass data from game logic to rendering or UI without exposing it as a callout.
+|-
+| <code>Spring.SendLuaRulesMsg</code> / <code>gadget:RecvLuaMsg</code> || LuaUI → LuaRules || UI triggers a game action beyond normal unit orders.
+|-
+| <code>Spring.SendLuaUIMsg</code> / <code>widget:RecvLuaMsg</code> || LuaUI ↔ all LuaUIs || Broadcast UI state to other players' widgets.
+|-
+| Rules params (<code>Spring.SetRulesParam</code>) || LuaRules → all || Expose synced values as read-only key/value pairs readable by any environment.
+|}
+
+See [[Recoil:Wupget Communication]] for detailed examples and best practices.
+
+=== Creating user interfaces ===
+
+There are two main approaches to UI in Recoil:
+
+* '''OpenGL drawing''' — use <code>gl.*</code> callouts directly (as in the widget example above) or a higher-level framework like [https://github.com/beyond-all-reason/Beyond-All-Reason/tree/master/luaui/Widgets FlowUI] or [https://springrts.com/wiki/Chili Chili].
+* '''RmlUi''' — Recoil has built-in support for an HTML/CSS-style reactive UI framework. Recommended for complex interfaces. See [[Recoil:RmlUI Starter Guide]].
+
+----
+
+== 11. Running Your Game ==
+
+The engine is launched with a '''start script''' — a plain text file (conventionally <code>.sdf</code>) describing who is playing, which game, and which map.
 
 === Minimal start script ===
 
-<syntaxhighlight lang="ini">
+<pre>
 [GAME]
 {
     GameType = My Recoil Game;   -- must match modinfo.lua name or shortName
@@ -493,7 +640,7 @@ The engine is launched with a '''start script''' — a plain text file (conventi
         TeamLeader = 0;
         AllyTeam   = 0;
         RgbColor   = 0.1 0.4 1.0;
-        Side       = MyFaction;    -- must match a side declared in modinfo.lua
+        Side       = MyFaction;   -- must match a side declared in modinfo.lua
         StartPosX  = 4000;
         StartPosZ  = 4000;
     }
@@ -503,189 +650,44 @@ The engine is launched with a '''start script''' — a plain text file (conventi
         NumAllies = 0;
     }
 }
-</syntaxhighlight>
-
-Save this as <code>game.sdf</code> in your Recoil data directory, then launch:
-
-<pre>
-./spring game.sdf
 </pre>
 
-On Windows:
+Save as <code>game.sdf</code> in your Recoil data directory and launch:
 
 <pre>
-spring.exe game.sdf
+./spring game.sdf          # Linux
+spring.exe game.sdf        # Windows
 </pre>
 
-The engine will:
-# Read the start script
-# Mount your game archive from <code>games/mygame.sdd</code>
-# Mount the map archive from <code>maps/my_map.sd7</code>
-# Load basecontent (default widget handlers, etc.)
-# Start the simulation and call into your Lua scripts
+{{warning|1=If the engine cannot find your game, check that the folder name ends in exactly <code>.sdd</code> (case-sensitive on Linux) and that <code>modinfo.lua</code> is at the root of that folder, not in a subfolder.}}
 
-{{warning|1=If the engine cannot find your game archive, check that the folder name ends in exactly <code>.sdd</code> (case-sensitive on Linux) and that <code>modinfo.lua</code> is at the root of that folder, '''not''' in a subfolder.}}
+=== Headless mode ===
 
-=== Quick test with headless ===
-
-For automated testing (or when you don't need graphics), use the headless binary:
+For automated testing or AI-vs-AI matches without graphics:
 
 <pre>
 ./spring_headless game.sdf
 </pre>
 
-Widgets still run, so you can run AI vs AI matches or data-gathering scripts without a window.
+Widgets still run in headless mode, making it useful for data-gathering scripts and CI testing.
+
+=== Hot-reloading Lua scripts ===
+
+While a game is running you can reload Lua environments without restarting:
+
+<pre>
+/luarules reload    ← reload LuaRules gadgets
+/luaui reload      ← reload LuaUI widgets
+</pre>
+
+This dramatically speeds up iteration. Keep <code>/cheat</code> toggled on during development so these commands are available.
 
 ----
 
-== 10. Lua Scripting Basics ==
-
-Lua is the scripting language for everything above the C++ engine layer.
-The engine provides several isolated Lua environments:
-
-{| class="wikitable"
-! Environment !! Location !! Purpose
-|-
-| '''LuaRules''' (synced) || <code>luarules/main.lua</code> || Authoritative game logic. Desync if misused.
-|-
-| '''LuaRules''' (unsynced) || <code>luarules/draw.lua</code> || Unsynced effects and UI driven by game logic.
-|-
-| '''LuaUI''' || <code>luaui/main.lua</code> || Player-facing UI: HUD, minimap overlays, etc.
-|-
-| '''LuaGaia''' || <code>luagaia/main.lua</code> || Logic for the neutral Gaia team (wrecks, features, world events).
-|-
-| '''LuaIntro''' || <code>luaintro/main.lua</code> || Loading screen, briefings.
-|-
-| '''LuaMenu''' || <code>luamenu/main.lua</code> || Main menu (pre-game). Requires a menu archive.
-|}
-
-Basecontent provides default <code>main.lua</code> entry points and wupget handler boilerplate so you can start writing gadgets and widgets without building the handler yourself.
-
-=== Your first gadget ===
-
-A gadget is a Lua file the gadget handler loads from <code>luarules/gadgets/</code>.
-
-<syntaxhighlight lang="lua">
--- luarules/gadgets/game_end.lua
--- Ends the game when a player's Commander is destroyed.
-
-local gadget = gadget ---@type Gadget
-
-function gadget:GetInfo()
-    return {
-        name    = "Game End Conditions",
-        desc    = "Ends the game on Commander death.",
-        author  = "YourName",
-        date    = "2025",
-        license = "GNU GPL, v2 or later",
-        layer   = 0,
-        enabled = true,
-    }
-end
-
--- Only run the logic in synced mode
-if not gadgetHandler:IsSyncedCode() then return end
-
--- Track alive Commanders per team
-local commanderByTeam = {}
-
-function gadget:UnitFinished(unitID, unitDefID, teamID)
-    local def = UnitDefs[unitDefID]
-    -- UnitDefs inside wupgets is indexed by numeric ID, not name
-    if def and def.isCommander then
-        commanderByTeam[teamID] = unitID
-    end
-end
-
-function gadget:UnitDestroyed(unitID, unitDefID, teamID)
-    if commanderByTeam[teamID] == unitID then
-        commanderByTeam[teamID] = nil
-        -- Check whether any other living Commander still belongs to this allyteam
-        local allyTeamID = Spring.GetTeamAllyTeamID(teamID)
-        local hasCommander = false
-        for _, ally in ipairs(Spring.GetTeamList(allyTeamID)) do
-            if commanderByTeam[ally] then
-                hasCommander = true
-                break
-            end
-        end
-        if not hasCommander then
-            -- GameOver sends the end-of-game event to all clients
-            Spring.GameOver({ allyTeamID })
-        end
-    end
-end
-</syntaxhighlight>
-
-=== Your first widget ===
-
-A widget is a Lua file the widget handler loads from <code>luaui/widgets/</code>.
-
-<syntaxhighlight lang="lua">
--- luaui/widgets/resources_display.lua
--- Draws current metal and energy income in the corner of the screen.
-
-local widget = widget ---@type Widget
-
-function widget:GetInfo()
-    return {
-        name    = "Resources Display",
-        desc    = "Shows current resource income.",
-        author  = "YourName",
-        date    = "2025",
-        license = "GNU GPL, v2 or later",
-        layer   = 0,
-        enabled = true,
-    }
-end
-
-function widget:DrawScreen()
-    local metal, energy = Spring.GetTeamResources(Spring.GetMyTeamID())
-    if not metal then return end
-
-    gl.Color(1, 1, 1, 1)
-    gl.Text(string.format("Metal: %.0f  Energy: %.0f", metal, energy),
-            10, 40, 16, "s")
-end
-</syntaxhighlight>
-
-=== Callins and callouts ===
-
-'''Callins''' are functions in your code the engine calls at the right moment: <code>UnitCreated</code>, <code>UnitDestroyed</code>, <code>GameOver</code>, <code>DrawScreen</code>, <code>Update</code>, etc.
-Check the full list at runtime with <code>Script.GetCallInList()</code>.
-
-'''Callouts''' are <code>Spring.*</code> functions you call out to the engine: <code>Spring.GetTeamResources</code>, <code>Spring.GiveOrderToUnit</code>, <code>Spring.Echo</code>, etc.
-Full documentation is at [https://beyond-all-reason.github.io/spring/ldoc/ beyond-all-reason.github.io/spring/ldoc/].
-
-{{warning|1=Synced gadgets have strict rules — only call synced-safe functions. Calling unsynced functions from synced code causes a desync error. When in doubt, check <code>gadgetHandler:IsSyncedCode()</code> and gate appropriately.}}
-
-=== Communicating between environments ===
-
-The Lua environments are isolated from each other by design.
-Common bridges:
-
-{| class="wikitable"
-! Method !! Direction !! Notes
-|-
-| <code>WG</code> / <code>GG</code> table || Within one environment || Widgets share <code>WG</code>; gadgets share <code>GG</code>.
-|-
-| <code>SendToUnsynced</code> / <code>RecvFromSynced</code> || Synced → Unsynced || Pass data from game logic to rendering/UI.
-|-
-| <code>Spring.SendLuaRulesMsg</code> / <code>gadget:RecvLuaMsg</code> || LuaUI → LuaRules || UI triggers a game action beyond unit orders.
-|-
-| <code>Spring.SendLuaUIMsg</code> / <code>widget:RecvLuaMsg</code> || LuaUI ↔ LuaUI (all players) || Broadcast UI state to other players.
-|-
-| Rules params (<code>Spring.SetRulesParam</code>) || LuaRules → all || Expose synced data as read-only key/values.
-|}
-
-See [[Recoil:Wupget Communication]] for detailed examples.
-
-----
-
-== 11. Useful Debug Commands ==
+== 12. Useful Debug Commands ==
 
 In-game chat commands prefixed with <code>/</code> control engine and game state.
-With cheats enabled (<code>/cheat</code>) additional commands become available:
+Enable cheats first with <code>/cheat</code>:
 
 {| class="wikitable"
 ! Command !! Effect
@@ -694,119 +696,179 @@ With cheats enabled (<code>/cheat</code>) additional commands become available:
 |-
 | <code>/give [unitname]</code> || Spawn a unit at the cursor position.
 |-
-| <code>/destroy</code> || Destroy selected units immediately.
+| <code>/destroy</code> || Destroy all selected units immediately.
 |-
 | <code>/invincible</code> || Toggle invincibility for selected units.
 |-
-| <code>/godmode</code> || Toggle god mode (all units obey all players).
+| <code>/godmode</code> || Toggle god mode — all units obey all players.
 |-
 | <code>/speed [x]</code> || Set game speed multiplier (e.g. <code>/speed 5</code>).
 |-
-| <code>/nopause</code> || Disallow pausing.
+| <code>/luarules reload</code> || Reload all LuaRules gadgets.
 |-
-| <code>/luarules reload</code> || Reload LuaRules scripts without restarting.
+| <code>/luaui reload</code> || Reload all LuaUI widgets.
 |-
-| <code>/luaui reload</code> || Reload LuaUI scripts without restarting.
+| <code>/editdefs</code> || Enter def-editing mode. Lets you change unit defs live via Lua assignment (development only, desyncs in multiplayer).
 |-
-| <code>/editdefs</code> || Enter def-editing mode (requires cheats). See unit def docs.
-|-
-| <code>Spring.Echo("msg")</code> || Print a message to the in-game console from Lua.
+| <code>Spring.Echo("msg")</code> || Print a message to the in-game console from any Lua environment.
 |}
 
-----
-
-== 12. Maps and Map Integration ==
-
-Maps are separate archives (<code>.sd7</code> or <code>.sdz</code>) placed in <code>maps/</code>.
-They are not shipped with your game.
-The map defines the terrain height data (<code>.smf</code>), sky, water, and can optionally define starting metal spots and features.
-
-=== Controlling what maps do to your game ===
-
-Maps can include a <code>mapinfo.lua</code> which may set atmosphere, gravity, and other properties.
-A map can also override unit def values via <code>MapOptions.lua</code>, which your game can read with <code>Spring.GetMapOptions()</code>.
-
-You can '''restrict which maps are compatible''' by checking map properties in a gadget at startup and calling <code>Spring.GameOver</code> if requirements are not met.
-
-=== Metal spots ===
-
-Metal spots (mexes) are typically defined in the map as SMF/SMD metal map data, or via a Lua file in the map archive.
-Your gadgets can read them with <code>Spring.GetMetalMapSize()</code> and <code>Spring.ExtractorInRangeMetalMap()</code>.
-Extractor units that generate metal must have a <code>extractsMetal</code> unit def key > 0 and be placed over a metal spot.
+{{tip|1=Add <code>Spring.Echo()</code> calls liberally while developing. They appear in the in-game console and in the engine log file (<code>infolog.txt</code>).}}
 
 ----
 
-== 13. Packaging and Distribution ==
+== 13. Resources and Economy ==
 
-When your game is ready for distribution, compress the <code>.sdd</code> folder contents into an <code>.sdz</code> (zip) or <code>.sd7</code> (7-zip) file.
+Recoil's economy follows the TA tradition: resources are a flow rate, not a stockpile of discrete units.
+
+=== Metal ===
+
+Metal is the primary construction resource, gathered by:
+
+* '''Metal extractors''' (mexes) — units with <code>extractsMetal > 0</code> placed over metal spots defined in the map.
+* '''Metal converters / makers''' — units that convert energy into metal at an exchange rate.
+* '''Reclaiming''' — construction units can reclaim wreckage, trees, and living units/structures to recover metal.
+
+Metal spots are defined in the map archive (as an SMF metal intensity map or a Lua table) and read with <code>Spring.GetMetalMapSize()</code> and related callouts.
+
+=== Energy ===
+
+Energy is produced by:
+
+* '''Solar collectors''' — cheap, stable, small output.
+* '''Geothermal plants''' — placed on geothermal vents for high, free output.
+* '''Fusion reactors''' — high output, high cost, large explosion on death.
+* '''Wind generators''' — cheap, output depends on map wind setting.
+
+Most level-2 weapons and some movement types consume energy to fire or operate.
+An energy deficit stalls construction and disables energy-hungry weapons.
+
+{{tip|1=Keep metal and energy production roughly balanced. An energy surplus is wasted; an energy deficit stalls your economy. Watching the +/- indicator next to each resource bar is the fastest way to spot a developing shortage.}}
+
+=== Storage ===
+
+By default teams have a small resource cap. Build storage structures to increase it.
+<code>metalStorage</code> and <code>energyStorage</code> are unit def keys you set on storage buildings.
+
+----
+
+== 14. Maps and Map Integration ==
+
+Maps are separate archives placed in <code>maps/</code>.
+They are not bundled with your game — players download them independently.
+
+The map defines:
+* Height terrain data (the <code>.smf</code> file)
+* Sky, water, atmosphere settings
+* Metal spot positions
+* Feature placement (trees, rocks)
+* Optional <code>mapinfo.lua</code> with gravity, max wind, and other overrides
+
+=== Reading map data from Lua ===
 
 <pre>
-# Linux: create .sdz (zip)
+-- Inside a gadget (synced):
+local mapX, mapZ = Game.mapSizeX, Game.mapSizeZ
+local metalX, metalZ = Spring.GetMetalMapSize()
+
+-- Place a unit at the start position of team 0:
+local x, y, z = Spring.GetTeamStartPosition(0)
+Spring.CreateUnit("commander", x, y, z, "n", 0)
+</pre>
+
+=== Restricting map compatibility ===
+
+Check map properties at startup and call <code>Spring.GameOver</code> if requirements are not met:
+
+<pre>
+function gadget:GamePreload()
+    local mapOptions = Spring.GetMapOptions()
+    if mapOptions.myRequiredKey ~= "expectedValue" then
+        Spring.Echo("This map is not compatible with MyGame!")
+        Spring.GameOver({})
+    end
+end
+</pre>
+
+----
+
+== 15. Packaging and Distribution ==
+
+When ready to distribute, compress your <code>.sdd</code> folder contents:
+
+<pre>
+# Linux — create .sdz (zip)
 cd games/mygame.sdd
 zip -r ../mygame-0.1.0.sdz .
 
-# Linux: create .sd7 (7-zip, better compression)
+# Linux — create .sd7 (7-zip; better compression)
 cd games/mygame.sdd
 7z a ../mygame-0.1.0.sd7 .
 </pre>
 
-{{warning|1=Make sure <code>modinfo.lua</code> ends up at the '''root''' of the archive, not inside a subfolder. Some zip tools create an extra folder level automatically.}}
+{{warning|1=Make sure <code>modinfo.lua</code> ends up at the '''root''' of the archive, not inside a subfolder. Some zip tools create an extra folder level automatically — check the archive structure before distributing.}}
 
 === Rapid ===
 
 [https://github.com/beyond-all-reason/rapid Rapid] is the standard package distribution system for Recoil games.
-It allows lobby clients (e.g. Chobby) to download and update games automatically.
-See the Rapid documentation and the [https://github.com/beyond-all-reason/RecoilEngine/blob/master/doc/site/content/articles/start-script-format.md start script format] for integration details.
+It allows lobby clients such as [https://github.com/beyond-all-reason/bar-lobby BAR Lobby] or [https://github.com/beyond-all-reason/Chobby Chobby] to download and update games automatically.
+See the [https://github.com/beyond-all-reason/rapid Rapid documentation] for how to host and tag releases.
 
 ----
 
-== 14. Next Steps ==
+== 16. Next Steps ==
 
-With a working minimal game, the typical next steps are:
+With a working minimal game, the usual next steps are:
 
 ; '''More unit types'''
-: Add builders, resource extractors, power generators, turrets, and mobile combat units. Follow the same unit def pattern — each is a Lua file in <code>units/</code>.
+: Add builders, resource extractors, power generators, turrets, and mobile combat units following the same unit def pattern. Give each its own file in <code>units/</code>.
 
-; '''Resource extractors'''
-: A unit with <code>extractsMetal > 0</code> placed over a metal spot generates metal. Add an energy converter unit to turn metal into energy and vice versa.
+; '''MoveClasses'''
+: Define movement types in <code>gamedata/movedefs.lua</code> to control how units traverse terrain: hover, boat, amphibious, kbot, tank, aircraft. Each family has different slope tolerance and water behaviour.
 
-; '''Pathfinding and MoveClasses'''
-: Define <code>movedefs</code> in <code>gamedata/movedefs.lua</code> to control how different unit types traverse terrain (hover, boat, amphibious, kbot, tank, aircraft).
+; '''Armour classes'''
+: Define armour types in <code>gamedata/armorclasses.lua</code> and reference them in unit defs. Then use the <code>damage</code> table in weapon defs to give different damage values against different armour classes.
+
+; '''Resource extractors and converters'''
+: A unit with <code>extractsMetal > 0</code> placed over a metal spot extracts metal. Add an energy converter unit to turn metal into energy and vice versa. Add storage buildings with <code>metalStorage</code> / <code>energyStorage</code>.
+
+; '''Tech levels and factories'''
+: A factory unit has a <code>buildOptions</code> list of unit def names it can produce. Level-2 factories can be unlocked by a prerequisite gadget once a level-2 lab is built.
 
 ; '''AI support'''
-: The Skirmish AI interface lets players add bot opponents without any extra gadget work. Beyond that, you can write a [[https://springrts.com/wiki/Lua_AI Lua AI]] for fully custom bot behaviour inside your game's Lua scripting.
+: The Skirmish AI interface lets players add bot opponents without any gadget work. For custom AI behaviour, write a [[https://springrts.com/wiki/Lua_AI Lua AI]] inside your game's Lua scripting.
 
 ; '''Full UI'''
-: The basecontent widget handler gives you a basic HUD for free. For a polished interface use [[Recoil:RmlUI Starter Guide|RmlUI]] for HTML/CSS-style widgets, or raw OpenGL via <code>gl.*</code> callouts.
+: The basecontent widget handler gives you a functional HUD for free. For a polished interface, use [[Recoil:RmlUI Starter Guide|RmlUI]] for HTML/CSS-style reactive widgets, or raw <code>gl.*</code> OpenGL callouts for maximum control.
 
-; '''Maps'''
-: Creating your own map requires tools like [https://github.com/beyond-all-reason/MapConv MapConv] (height and texture compilation) and [https://springrts.com/wiki/SpringMapEdit SpringMapEdit]. See the Recoil map documentation for details.
+; '''Map creation'''
+: Creating your own map requires [https://github.com/beyond-all-reason/MapConv MapConv] (height and texture compilation) and a height editor such as [https://springrts.com/wiki/SpringMapEdit SpringMapEdit]. See the Recoil map documentation for the full pipeline.
 
-; '''Replays and dedicated servers'''
-: Replays are recorded automatically when <code>RecordDemo=1</code> is set in the start script. For large-scale multiplayer use the dedicated binary (<code>spring_dedicated</code>) and an autohost such as [https://springrts.com/wiki/SPADS SPADS] or [https://springrts.com/wiki/Springie Springie].
+; '''Multiplayer and dedicated servers'''
+: Replays are recorded automatically when <code>RecordDemo=1</code> is set in the start script. For large-scale multiplayer, use the dedicated binary (<code>spring_dedicated</code>) with an autohost such as [https://github.com/gajop/spads SPADS].
 
 ----
 
-== 15. Further Reading ==
+== 17. Further Reading ==
 
 === On this wiki ===
 
 * [[Recoil:VFS Basics]] — full documentation of the Virtual File System, modes, and load order
 * [[Recoil:Unit Types Basics]] — deep dive into unit defs, post-processing, and the wupget-facing UnitDefs table
 * [[Recoil:Widgets and Gadgets]] — the addon (wupget) system in full detail
-* [[Recoil:Wupget Communication]] — how to pass data between Lua environments
+* [[Recoil:Wupget Communication]] — passing data between Lua environments
 * [[Recoil:RmlUI Starter Guide]] — reactive HTML/CSS-style UI for your game
 * [[Recoil:Headless and Dedicated]] — server binaries and automated testing
-* [[Recoil:Migrating From Spring]] — for existing Spring 105 games
+* [[Recoil:Migrating From Spring]] — breaking changes from Spring 105 to Recoil
+* [[Spring_guide!]] — the original Spring player guide (most strategy concepts still apply)
 
 === External resources ===
 
-* [https://beyond-all-reason.github.io/spring/ldoc/ Recoil Lua API reference] — complete callout/callin documentation
+* [https://beyond-all-reason.github.io/spring/ldoc/ Recoil Lua API reference] — complete callout and callin documentation
 * [https://github.com/beyond-all-reason/RecoilEngine RecoilEngine on GitHub] — source, releases, and issue tracker
-* [https://recoilengine.org/ recoilengine.org] — official website with downloads and changelog
-* [https://discord.gg/recoil Recoil Discord] — community support and engine developer discussions
-* [https://springrts.com/wiki/Simple_Game_Tutorial Spring Simple Game Tutorial] — older but still broadly applicable tutorial (Spring and Recoil are highly compatible)
+* [https://github.com/beyond-all-reason/RecoilEngine/tree/master/cont/base/springcontent Basecontent source] — default wupget handlers, tree defs, and other baseline content
+* [https://springrts.com/wiki/Simple_Game_Tutorial Spring Simple Game Tutorial] — older but still broadly applicable (Spring and Recoil are highly compatible)
+* [https://springrts.com/wiki/ SpringRTS wiki] — extensive documentation covering unit defs, weapon types, movement types, and more that applies directly to Recoil
 
 [[Category:Guides]]
 [[Category:Recoil]]
-[[Category:Game Development]]

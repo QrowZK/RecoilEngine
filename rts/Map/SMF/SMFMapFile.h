@@ -5,6 +5,7 @@
 
 #include "System/FileSystem/FileHandler.h"
 #include "SMFFormat.h"
+#include "SMFFormat_Multi.h"
 
 #include <string>
 #include <vector>
@@ -27,6 +28,16 @@ public:
 	int ReadMinimap(std::vector<std::uint8_t>& data, unsigned miplevel);
 	void ReadHeightmap(unsigned short* heightmap);
 	void ReadHeightmap(float* sHeightMap, float* uHeightMap, float base, float mod);
+
+	/**
+	 * Read an additional terrain layer heightmap into out[].
+	 * @param layerIdx  1-based index into multiLayerHeader.heightmapPtrs[]
+	 *                  (i.e. pass 1 for the first extra layer, 2 for the second).
+	 * @param out       Pre-allocated float buffer of size (mapx+1)*(mapy+1).
+	 * @return true on success, false if the layer is not present.
+	 */
+	bool ReadLayerHeightmap(int layerIdx, float* out);
+
 	void ReadFeatureInfo();
 	void ReadFeatureInfo(MapFeatureInfo* f);
 	void GetInfoMapSize(const char* name, MapBitmapInfo*) const;
@@ -37,7 +48,14 @@ public:
 
 	const char* GetFeatureTypeName(int typeID) const;
 
-	const SMFHeader& GetHeader() const { return header; }
+	const SMFHeader&           GetHeader()           const { return header; }
+	const MultiLayerExtraHeader& GetMultiLayerHeader() const { return multiLayerHeader; }
+
+	/// True if this file contains more than one terrain layer.
+	bool HasMultiLayers() const { return multiLayerHeader.numExtraLayers > 0; }
+
+	/// Total terrain layer count (1 for classic maps, up to SMF_MAX_TERRAIN_LAYERS).
+	int GetLayerCount() const { return 1 + multiLayerHeader.numExtraLayers; }
 
 	/**
 	 * @deprecated do not use, just here for backward compatibility
@@ -53,11 +71,13 @@ private:
 	void ReadMapHeader(SMFHeader& head, CFileHandler& file);
 	void ReadMapFeatureHeader(MapFeatureHeader& head, CFileHandler& file);
 	void ReadMapFeatureStruct(MapFeatureStruct& head, CFileHandler& file);
+	void ParseExtraHeaders();
 
 	CFileHandler ifs;
 
-	SMFHeader header;
-	MapFeatureHeader featureHeader;
+	SMFHeader            header;
+	MapFeatureHeader     featureHeader;
+	MultiLayerExtraHeader multiLayerHeader = {};
 
 	char featureTypes[16384][32];
 

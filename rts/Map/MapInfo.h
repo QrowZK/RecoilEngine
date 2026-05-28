@@ -206,6 +206,22 @@ public:
 		bool splatDetailNormalDiffuseAlpha;
 	} smf;
 
+	/**
+	 * Multi-layer terrain configuration read from the "MAP\terrain" Lua table.
+	 * When absent the engine behaves as before (single surface layer).
+	 */
+	struct terrain_layer_t {
+		std::string name;
+		float       baseHeight  = 0.0f;
+		bool        deformable  = true;
+	};
+
+	struct terrain_t {
+		static constexpr int MAX_LAYERS = 3;
+		terrain_layer_t layers[MAX_LAYERS];
+		int             numLayers = 0; ///< 0 means "not configured" (legacy single-layer)
+	} terrain;
+
 	struct pfs_t {
 		struct legacy_constants_t {
 		} legacy_constants;
@@ -255,6 +271,7 @@ private:
 	void ReadWater();
 	void ReadSMF();
 	void ReadTerrainTypes();
+	void ReadTerrainLayers();
 	void ReadPFSConstants();
 	void ReadSound();
 

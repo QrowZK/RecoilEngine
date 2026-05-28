@@ -70,6 +70,7 @@ CMapInfo::CMapInfo(const std::string& mapFileName, const string& mapHumanName): 
 	ReadWater();
 	ReadSMF();
 	ReadTerrainTypes();
+	ReadTerrainLayers();
 	ReadPFSConstants();
 	ReadSound();
 
@@ -455,6 +456,27 @@ void CMapInfo::ReadTerrainTypes()
 		terrType.shipSpeed  = std::max(0.000f, terrType.shipSpeed);
 	}
 }
+
+void CMapInfo::ReadTerrainLayers()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+	const LuaTable& terrainTable = mapInfoParser.GetRoot().SubTable("terrain");
+	const LuaTable& layersTable  = terrainTable.SubTable("layers");
+
+	terrain.numLayers = 0;
+
+	for (int i = 1; i <= terrain_t::MAX_LAYERS; ++i) {
+		const LuaTable& layerTable = layersTable.SubTable(i);
+		if (!layerTable.IsValid())
+			break;
+
+		terrain_layer_t& layer = terrain.layers[terrain.numLayers++];
+		layer.name       = layerTable.GetString("name",       "Layer" + IntToString(i));
+		layer.baseHeight = layerTable.GetFloat ("baseHeight", 0.0f);
+		layer.deformable = layerTable.GetBool  ("deformable", true);
+	}
+}
+
 
 void CMapInfo::ReadPFSConstants()
 {

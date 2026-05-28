@@ -7,10 +7,14 @@
 #include "System/StringHash.h"
 #include "System/Platform/byteorder.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstring>
 
 #include "System/Misc/TracyDefs.h"
+
+static float ReadFloat(CFileHandler& file);
+static int   ReadInt  (CFileHandler& file);
 
 
 static bool CheckHeader(const SMFHeader& h)
@@ -47,11 +51,12 @@ void CSMFMapFile::Open(const std::string& mapFileName)
 
 	ReadMapHeader(header, ifs);
 
-	if (CheckHeader(header))
-		return;
+	if (!CheckHeader(header)) {
+		snprintf(buf, sizeof(buf), fmts[1], __func__, mapFileName.c_str(), header.version, header.tilesize, header.texelPerSquare, header.squareSize);
+		throw content_error(buf);
+	}
 
-	snprintf(buf, sizeof(buf), fmts[1], __func__, mapFileName.c_str(), header.version, header.tilesize, header.texelPerSquare, header.squareSize);
-	throw content_error(buf);
+	ParseExtraHeaders();
 }
 
 void CSMFMapFile::Close()
@@ -61,9 +66,78 @@ void CSMFMapFile::Close()
 
 	memset(&       header, 0, sizeof(       header));
 	memset(&featureHeader, 0, sizeof(featureHeader));
+	memset(&multiLayerHeader, 0, sizeof(multiLayerHeader));
 	memset( featureTypes , 0, sizeof(featureTypes ));
 
 	featureFileOffset = 0;
+}
+
+
+void CSMFMapFile::ParseExtraHeaders()
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+
+	if (header.numExtraHeaders <= 0)
+		return;
+
+	ifs.Seek(sizeof(SMFHeader));
+
+	for (int i = 0; i < header.numExtraHeaders; ++i) {
+		const int startPos = ifs.GetPos();
+
+		int size = ReadInt(ifs);
+		int type = ReadInt(ifs);
+
+		if (type == MEH_MultiLayer) {
+			multiLayerHeader.size           = size;
+			multiLayerHeader.type           = type;
+			multiLayerHeader.numExtraLayers = ReadInt(ifs);
+
+			const int clampedLayers = std::min(multiLayerHeader.numExtraLayers,
+			                                   SMF_MAX_TERRAIN_LAYERS - 1);
+			for (int l = 0; l < clampedLayers; ++l) {
+				multiLayerHeader.heightmapPtrs[l] = ReadInt(ifs);
+				multiLayerHeader.minHeights   [l] = ReadFloat(ifs);
+				multiLayerHeader.maxHeights   [l] = ReadFloat(ifs);
+			}
+			// No need to parse further extra headers for our purposes.
+			return;
+		}
+
+		// Skip over this unknown/unneeded extra header
+		ifs.Seek(startPos + size);
+	}
+}
+
+
+bool CSMFMapFile::ReadLayerHeightmap(int layerIdx, float* out)
+{
+	RECOIL_DETAILED_TRACY_ZONE;
+
+	// layerIdx is 1-based (1 = first extra layer)
+	if (layerIdx < 1 || layerIdx > multiLayerHeader.numExtraLayers)
+		return false;
+
+	const int ptr = multiLayerHeader.heightmapPtrs[layerIdx - 1];
+	if (ptr == 0)
+		return false;
+
+	const float base = multiLayerHeader.minHeights[layerIdx - 1];
+	const float mod  = (multiLayerHeader.maxHeights[layerIdx - 1] - base) / 65535.0f;
+
+	const int hmx = header.mapx + 1;
+	const int hmy = header.mapy + 1;
+	const int len = hmx * hmy;
+
+	unsigned short word = 0;
+	ifs.Seek(ptr);
+
+	for (int i = 0; i < len; ++i) {
+		ifs.Read(&word, sizeof(word));
+		out[i] = base + swabWord(word) * mod;
+	}
+
+	return true;
 }
 
 

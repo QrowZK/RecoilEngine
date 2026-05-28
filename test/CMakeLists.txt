@@ -166,6 +166,21 @@ endif()
 	add_spring_test(${test_name} "${test_src}" "${test_libs}" "-DNOT_USING_CREG")
 
 ################################################################################
+### MultiLayerHeightMap
+	set(test_name MultiLayerHeightMap)
+	set(test_src
+			"${CMAKE_CURRENT_SOURCE_DIR}/engine/Map/testMultiLayerHeightMap.cpp"
+			"${ENGINE_SOURCE_DIR}/Map/MultiLayerHeightMap.cpp"
+			${test_Common_sources}
+		)
+
+	set(test_libs
+			""
+		)
+
+	add_spring_test(${test_name} "${test_src}" "${test_libs}" "-DNOT_USING_CREG -DNOT_USING_STREFLOP -DBUILDING_AI")
+
+################################################################################
 ### Float3
 	set(test_name Float3)
 	set(test_src

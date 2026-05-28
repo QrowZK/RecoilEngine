@@ -5,6 +5,7 @@
 
 #include "Map/BaseGroundDrawer.h"
 #include "Map/SMF/SMFRenderState.h"
+#include "Map/SMF/MultiLayerTerrainRenderer.h"
 #include "Rendering/GL/GeometryBuffer.h"
 #include "Rendering/GL/LightHandler.h"
 #include "Rendering/GL/RenderBuffersFwd.h"
@@ -73,6 +74,14 @@ public:
 	IMeshDrawer* GetMeshDrawer() { return meshDrawer; }
 	IMeshDrawer* SwitchMeshDrawer(int wantedMode = -1);
 
+	/**
+	 * Enable multi-layer rendering using the supplied heightmap.
+	 * Once set, Draw() routes through MultiLayerTerrainRenderer which
+	 * draws all active layers back-to-front before the single-layer pass.
+	 */
+	void SetMultiLayerHeightMap(const MultiLayerHeightMap* hm);
+	MultiLayerTerrainRenderer* GetMultiLayerRenderer() { return multiLayerRenderer.get(); }
+
 private:
 	ISMFRenderState* SelectRenderState(const DrawPass::e& drawPass);
 
@@ -99,6 +108,8 @@ protected:
 
 	Shader::IProgramObject* borderShader = nullptr;
 	Shader::IProgramObject* shadowShader = nullptr;
+
+	std::unique_ptr<MultiLayerTerrainRenderer> multiLayerRenderer;
 };
 
 #endif // _SMF_GROUND_DRAWER_H_

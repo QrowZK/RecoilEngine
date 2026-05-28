@@ -2,6 +2,7 @@
 
 #include "SMFReadMap.h"
 #include "SMFGroundDrawer.h"
+#include "MultiLayerTerrainRenderer.h"
 #include "SMFGroundTextures.h"
 #include "SMFRenderState.h"
 #include "Game/Camera.h"
@@ -319,6 +320,11 @@ void CSMFGroundDrawer::Draw(const DrawPass::e& drawPass)
 	glEnable(GL_CULL_FACE);
 	glCullFace(GL_BACK);
 
+	// Multi-layer terrain: render all active layers back-to-front.
+	// The standard single-layer path below still runs for layer 1 (surface).
+	if (multiLayerRenderer)
+		multiLayerRenderer->Render(drawPass);
+
 	if (drawDeferred) {
 		// do the deferred pass first, will allow us to re-use
 		// its output at some future point and eventually draw
@@ -460,6 +466,19 @@ void CSMFGroundDrawer::Update()
 	if (drawDeferred) {
 		drawDeferred &= UpdateGeometryBuffer(false);
 	}
+
+	if (multiLayerRenderer)
+		multiLayerRenderer->Update();
+}
+
+
+void CSMFGroundDrawer::SetMultiLayerHeightMap(const MultiLayerHeightMap* hm)
+{
+	if (hm == nullptr) {
+		multiLayerRenderer.reset();
+		return;
+	}
+	multiLayerRenderer = std::make_unique<MultiLayerTerrainRenderer>(this, hm);
 }
 
 void CSMFGroundDrawer::UpdateRenderState()

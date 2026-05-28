@@ -5,6 +5,8 @@
 
 #include "System/float3.h"
 
+#include <cstdint>
+
 class IMapDamage
 {
 public:

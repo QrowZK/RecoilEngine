@@ -111,6 +111,8 @@ CReadMap* readMap = nullptr;
 
 MapDimensions mapDims;
 
+MultiLayerHeightMap* multiLayerHeightMap = nullptr;
+
 std::vector<float> CReadMap::mapFileHeightMap;
 std::vector<float> CReadMap::originalHeightMap;
 std::vector<float> CReadMap::centerHeightMap;

@@ -25,6 +25,7 @@
 #include "Map/MapInfo.h"
 #include "Map/MapParser.h"
 #include "Map/ReadMap.h"
+#include "Map/MultiLayerHeightMap.h"
 #include "Rendering/Env/GrassDrawer.h"
 #include "Rendering/Models/IModelParser.h"
 #include "Rendering/Models/3DModel.hpp"
@@ -353,6 +354,9 @@ bool LuaSyncedRead::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(GetGroundInfo);
 	REGISTER_LUA_CFUNC(GetGroundBlocked);
 	REGISTER_LUA_CFUNC(GetGroundExtremes);
+	REGISTER_LUA_CFUNC(GetActiveTerrainLayerMask);
+	REGISTER_LUA_CFUNC(GetTerrainHeightRange);
+	REGISTER_LUA_CFUNC(GetTerrainLayerCount);
 	REGISTER_LUA_CFUNC(GetTerrainTypeData);
 	REGISTER_LUA_CFUNC(GetGrass);
 
@@ -7799,6 +7803,85 @@ int LuaSyncedRead::GetGroundExtremes(lua_State* L)
 	lua_pushnumber(L, readMap->GetCurrMinHeight());
 	lua_pushnumber(L, readMap->GetCurrMaxHeight());
 	return 4;
+}
+
+
+/***
+ * Returns a bitmask indicating which terrain layers have been populated
+ * in the multi-layer heightmap.  Bit 0 = Underground, bit 1 = Surface,
+ * bit 2 = Elevated.  Returns 0 if multi-layer terrain is not active.
+ *
+ * @function Spring.GetActiveTerrainLayerMask
+ * @param x number  world X position
+ * @param z number  world Z position
+ * @return number   uint8 bitmask (0–7)
+ */
+int LuaSyncedRead::GetActiveTerrainLayerMask(lua_State* L)
+{
+	const float wx = luaL_checkfloat(L, 1);
+	const float wz = luaL_checkfloat(L, 2);
+
+	// The global multiLayerHeightMap pointer is set during map load if the
+	// map file contains a MEH_MultiLayer extra header.  When single-layer
+	// maps are loaded the pointer is null and we return 0x02 (Surface only).
+	if (multiLayerHeightMap == nullptr) {
+		lua_pushnumber(L, 0x02);
+		return 1;
+	}
+
+	const int vx = static_cast<int>(wx / SQUARE_SIZE);
+	const int vz = static_cast<int>(wz / SQUARE_SIZE);
+	lua_pushnumber(L, multiLayerHeightMap->GetActiveLayerMask(vx, vz));
+	return 1;
+}
+
+
+/***
+ * Returns the minimum and maximum terrain heights across all active layers
+ * at the given world position.
+ *
+ * @function Spring.GetTerrainHeightRange
+ * @param x number  world X position
+ * @param z number  world Z position
+ * @return number   minHeight across all layers
+ * @return number   maxHeight across all layers
+ */
+int LuaSyncedRead::GetTerrainHeightRange(lua_State* L)
+{
+	const float wx = luaL_checkfloat(L, 1);
+	const float wz = luaL_checkfloat(L, 2);
+
+	if (multiLayerHeightMap == nullptr) {
+		const float h = CGround::GetHeightReal(wx, wz, CLuaHandle::GetHandleSynced(L));
+		lua_pushnumber(L, h);
+		lua_pushnumber(L, h);
+		return 2;
+	}
+
+	const int vx = static_cast<int>(wx / SQUARE_SIZE);
+	const int vz = static_cast<int>(wz / SQUARE_SIZE);
+	const float2 range = multiLayerHeightMap->GetHeightRange(vx, vz);
+	lua_pushnumber(L, range.x); // min
+	lua_pushnumber(L, range.y); // max
+	return 2;
+}
+
+
+/***
+ * Returns the number of terrain layers in the active map.
+ * Always 1 for single-layer (legacy) maps.
+ *
+ * @function Spring.GetTerrainLayerCount
+ * @return number  1 or 3
+ */
+int LuaSyncedRead::GetTerrainLayerCount(lua_State* L)
+{
+	if (multiLayerHeightMap == nullptr) {
+		lua_pushnumber(L, 1);
+		return 1;
+	}
+	lua_pushnumber(L, multiLayerHeightMap->GetLayerCount());
+	return 1;
 }
 
 

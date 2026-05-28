@@ -8,6 +8,7 @@
 
 #include "MapTexture.h"
 #include "MapDimensions.h"
+#include "MultiLayerHeightMap.h"
 #include "Sim/Misc/GlobalConstants.h"
 #include "Sim/Misc/GlobalSynced.h"
 #include "System/float3.h"
@@ -314,6 +315,13 @@ private:
 
 extern CReadMap* readMap;
 extern MapDimensions mapDims;
+
+/**
+ * Global multi-layer heightmap, non-null only for maps that contain a
+ * MEH_MultiLayer extra header in their .smf file.  Null on single-layer maps.
+ * Owned by the map loader; do NOT delete.
+ */
+extern MultiLayerHeightMap* multiLayerHeightMap;
 
 inline float CReadMap::AddHeight(const int idx, const float a) { return SetHeight(idx, a, 1); }
 inline float CReadMap::SetHeight(const int idx, const float h, const int add) {

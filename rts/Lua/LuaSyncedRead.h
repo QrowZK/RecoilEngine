@@ -258,6 +258,11 @@ class LuaSyncedRead {
 		static int GetTerrainTypeData(lua_State* L);
 		static int GetGrass(lua_State* L);
 
+		// Multi-layer terrain queries
+		static int GetActiveTerrainLayerMask(lua_State* L);
+		static int GetTerrainHeightRange(lua_State* L);
+		static int GetTerrainLayerCount(lua_State* L);
+
 		static int GetSmoothMeshHeight(lua_State* L);
 
 		static int TestMoveOrder(lua_State* L);

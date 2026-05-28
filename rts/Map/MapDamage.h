@@ -15,7 +15,17 @@ public:
 	virtual ~IMapDamage() {}
 
 	virtual void Explosion(const float3& pos, float strength, float radius, float& maxHeightDiff) = 0;
-	virtual void RecalcArea(int x1, int x2, int y1, int y2) = 0;
+
+	/**
+	 * Recalculate all derived terrain data (normals, slope, LOS, pathfinding)
+	 * for the region (x1,y1)-(x2,y2).
+	 *
+	 * @param layerMask  Bitmask of which terrain layers were modified
+	 *                   (bit 0 = Underground, bit 1 = Surface, bit 2 = Elevated).
+	 *                   Pass 0xFF to invalidate all layers (default, backward-compatible).
+	 */
+	virtual void RecalcArea(int x1, int x2, int y1, int y2, uint8_t layerMask = 0xFF) = 0;
+
 	virtual void TerrainTypeHardnessChanged(int ttIndex) {}
 	virtual void TerrainTypeSpeedModChanged(int ttIndex) {}
 

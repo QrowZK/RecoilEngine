@@ -225,7 +225,7 @@ void CBasicMapDamage::Explosion(const float3& pos, float strength, float radius,
 	}
 }
 
-void CBasicMapDamage::RecalcArea(int x1, int x2, int y1, int y2)
+void CBasicMapDamage::RecalcArea(int x1, int x2, int y1, int y2, uint8_t layerMask)
 {
 	RECOIL_DETAILED_TRACY_ZONE;
 	if (!readMap->GetHeightMapUpdated())

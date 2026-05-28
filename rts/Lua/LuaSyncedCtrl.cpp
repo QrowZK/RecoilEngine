@@ -25,6 +25,7 @@
 #include "Map/Ground.h"
 #include "Map/MapDamage.h"
 #include "Map/MapInfo.h"
+#include "Map/MultiLayerHeightMap.h"
 #include "Map/ReadMap.h"
 #include "Rendering/Env/GrassDrawer.h"
 #include "Rendering/Env/IGroundDecalDrawer.h"
@@ -333,6 +334,9 @@ bool LuaSyncedCtrl::PushEntries(lua_State* L)
 	REGISTER_LUA_CFUNC(AddHeightMap);
 	REGISTER_LUA_CFUNC(SetHeightMap);
 	REGISTER_LUA_CFUNC(SetHeightMapFunc);
+
+	REGISTER_LUA_CFUNC(SetHeightMapLayer);
+	REGISTER_LUA_CFUNC(LevelHeightMapLayer);
 
 	REGISTER_LUA_CFUNC(LevelOriginalHeightMap);
 	REGISTER_LUA_CFUNC(AdjustOriginalHeightMap);
@@ -6529,6 +6533,85 @@ int LuaSyncedCtrl::SetHeightMapFunc(lua_State* L)
 
 	lua_pushnumber(L, heightMapAmountChanged);
 	return 1;
+}
+
+
+/***
+ * Set height on a specific terrain layer at a single vertex.
+ *
+ * @function Spring.SetHeightMapLayer
+ * @param x number World-space X coordinate.
+ * @param z number World-space Z coordinate.
+ * @param height number New height value.
+ * @param layer integer Layer index (0=Underground, 1=Surface, 2=Elevated).
+ * @return nil
+ */
+int LuaSyncedCtrl::SetHeightMapLayer(lua_State* L)
+{
+	if (multiLayerHeightMap == nullptr) {
+		return 0;
+	}
+
+	const float xl     = luaL_checkfloat(L, 1);
+	const float zl     = luaL_checkfloat(L, 2);
+	const float h      = luaL_checkfloat(L, 3);
+	const int   layer  = luaL_checkint(L, 4);
+
+	const int x = static_cast<int>(xl / SQUARE_SIZE);
+	const int z = static_cast<int>(zl / SQUARE_SIZE);
+
+	if (x < 0 || x > mapDims.mapx || z < 0 || z > mapDims.mapy)
+		return 0;
+	if (layer < 0 || layer >= MultiLayerHeightMap::NUM_LAYERS)
+		return 0;
+
+	multiLayerHeightMap->SetHeight(x, z, layer, h);
+	mapDamage->RecalcArea(x, x, z, z);
+	return 0;
+}
+
+
+/***
+ * Set height on a specific terrain layer for a rectangular region.
+ *
+ * @function Spring.LevelHeightMapLayer
+ * @param x1 number
+ * @param z1 number
+ * @param x2 number
+ * @param z2 number
+ * @param height number
+ * @param layer integer Layer index (0=Underground, 1=Surface, 2=Elevated).
+ * @return nil
+ */
+int LuaSyncedCtrl::LevelHeightMapLayer(lua_State* L)
+{
+	if (multiLayerHeightMap == nullptr) {
+		return 0;
+	}
+
+	const float x1f = luaL_checkfloat(L, 1);
+	const float z1f = luaL_checkfloat(L, 2);
+	const float x2f = luaL_checkfloat(L, 3);
+	const float z2f = luaL_checkfloat(L, 4);
+	const float h   = luaL_checkfloat(L, 5);
+	const int layer = luaL_checkint(L, 6);
+
+	if (layer < 0 || layer >= MultiLayerHeightMap::NUM_LAYERS)
+		return 0;
+
+	const int x1 = std::max(0, static_cast<int>(x1f / SQUARE_SIZE));
+	const int z1 = std::max(0, static_cast<int>(z1f / SQUARE_SIZE));
+	const int x2 = std::min(mapDims.mapx, static_cast<int>(x2f / SQUARE_SIZE));
+	const int z2 = std::min(mapDims.mapy, static_cast<int>(z2f / SQUARE_SIZE));
+
+	for (int z = z1; z <= z2; z++) {
+		for (int x = x1; x <= x2; x++) {
+			multiLayerHeightMap->SetHeight(x, z, layer, h);
+		}
+	}
+
+	mapDamage->RecalcArea(x1, x2, z1, z2);
+	return 0;
 }
 
 

@@ -217,6 +217,9 @@ class LuaSyncedCtrl
 		static int SetHeightMap(lua_State* L);
 		static int SetHeightMapFunc(lua_State* L);
 
+		static int SetHeightMapLayer(lua_State* L);
+		static int LevelHeightMapLayer(lua_State* L);
+
 		static int LevelOriginalHeightMap(lua_State* L);
 		static int AdjustOriginalHeightMap(lua_State* L);
 		static int RevertOriginalHeightMap(lua_State* L);

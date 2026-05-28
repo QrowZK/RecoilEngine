@@ -81,6 +81,7 @@ add_library(engineSim STATIC
 		"${CMAKE_CURRENT_SOURCE_DIR}/Path/HAPFS/Registry.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Path/IPathController.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Path/IPathManager.cpp"
+		"${CMAKE_CURRENT_SOURCE_DIR}/Path/MultiLayerPathfinder.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Projectiles/ExpGenSpawnable.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Projectiles/ExpGenSpawner.cpp"
 		"${CMAKE_CURRENT_SOURCE_DIR}/Projectiles/ExplosionListener.cpp"

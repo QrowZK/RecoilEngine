@@ -3,6 +3,7 @@
 #include "SMFReadMap.h"
 #include "SMFGroundDrawer.h"
 #include "MultiLayerTerrainRenderer.h"
+#include "Map/MultiLayerFeatureFlags.h"
 #include "SMFGroundTextures.h"
 #include "SMFRenderState.h"
 #include "Game/Camera.h"
@@ -46,6 +47,7 @@ CONFIG(int, MaxDynamicMapLights)
 
 CONFIG(bool, AdvMapShading).defaultValue(true).safemodeValue(false).description("Enable shaders for terrain rendering.");
 CONFIG(bool, AllowDeferredMapRendering).defaultValue(false).safemodeValue(false).description("Enable rendering the map to the map deferred buffers.");
+CONFIG(bool, MultiLayerTerrainEnabled).defaultValue(false).description("Enable multi-layer terrain (underground/surface/elevated layers). Requires a map with multi-layer data.");
 CONFIG(bool, AllowDrawMapPostDeferredEvents).defaultValue(false).description("Enable DrawGroundPostDeferred Lua callin.");
 CONFIG(bool, AllowDrawMapDeferredEvents).defaultValue(false).description("Enable DrawGroundDeferred Lua callin.");
 
@@ -474,7 +476,7 @@ void CSMFGroundDrawer::Update()
 
 void CSMFGroundDrawer::SetMultiLayerHeightMap(const MultiLayerHeightMap* hm)
 {
-	if (hm == nullptr) {
+	if (hm == nullptr || !configHandler->GetBool("MultiLayerTerrainEnabled")) {
 		multiLayerRenderer.reset();
 		return;
 	}

@@ -254,6 +254,8 @@ MoveDef::MoveDef(const LuaTable& moveDefTable): MoveDef() {
 	allowTerrainCollisions = moveDefTable.GetBool("allowTerrainCollisions", true);
 	allowRawMovement = moveDefTable.GetBool("allowRawMovement", false);
 
+	traversableLayers = static_cast<uint8_t>(moveDefTable.GetInt("traversableLayers", 0xFF));
+
 	heatMapping = moveDefTable.GetBool("heatMapping", false);
 	flowMapping = moveDefTable.GetBool("flowMapping", true);
 

@@ -6,6 +6,7 @@
 #include <string>
 #include <vector>
 
+#include "ITerrainSystem.h"
 #include "System/type2.h"
 
 /**
@@ -33,7 +34,7 @@ struct LayerInfo {
  * Heights are stored as floats in world-space elmos, exactly as CReadMap uses
  * for its cornerHeightMap arrays.
  */
-class MultiLayerHeightMap {
+class MultiLayerHeightMap : public ITerrainSystem {
 public:
     static constexpr int NUM_LAYERS = 3;
 
@@ -98,11 +99,19 @@ public:
     float GetInterpolatedHeight(float x, float z, int layer) const;
 
     // -----------------------------------------------------------------------
+    // ITerrainSystem metadata overrides
+    // -----------------------------------------------------------------------
+
+    std::string GetLayerName(int layer)       const override { return IsValidLayer(layer) ? layerInfos[layer].name        : ""; }
+    float       GetLayerBaseHeight(int layer) const override { return IsValidLayer(layer) ? layerInfos[layer].baseHeight  : 0.0f; }
+    bool        IsLayerDeformable(int layer)  const override { return IsValidLayer(layer) ? layerInfos[layer].deformable  : false; }
+
+    // -----------------------------------------------------------------------
     // Dimensions
     // -----------------------------------------------------------------------
 
-    int GetWidth()       const { return width;  }
-    int GetMapHeight()   const { return height; }
+    int GetWidth()       const override { return width;  }
+    int GetMapHeight()   const override { return height; }
 
 private:
     int width;

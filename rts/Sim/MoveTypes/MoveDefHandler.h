@@ -143,6 +143,14 @@ struct MoveDef {
 
 	std::string name;
 
+	/**
+	 * Bitmask of which terrain layers this unit type can traverse.
+	 * Bit 0 = Underground, bit 1 = Surface (default), bit 2 = Elevated.
+	 * A value of 0xFF means "use all available layers" (default behaviour,
+	 * backward-compatible with single-layer maps).
+	 */
+	uint8_t traversableLayers = 0xFF;
+
 #pragma pack(push, 1)
 	SpeedModClass speedModClass = MoveDef::Tank;
 	TerrainClass terrainClass = MoveDef::Mixed;
